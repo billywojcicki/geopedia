@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Geopedia</title>
+  <meta name="description" content="A map of history. Browse Wikipedia by place and time.">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="map" aria-label="Map"></div>
+
+  <!-- Sidebar: brand, search, filters, list / article -->
+  <aside id="sidebar" class="glass" aria-label="Explore">
+    <header class="sb-head">
+      <div class="brand">
+        <h1 class="wordmark">Geopedia</h1>
+        <p class="tagline">The free atlas of history</p>
+      </div>
+      <button id="random" class="icon-btn" title="Surprise me" aria-label="Surprise me">
+        <svg viewBox="0 0 24 24" width="20" height="20"><rect x="3.5" y="3.5" width="17" height="17" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8.5" cy="8.5" r="1.4" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.4" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.4" fill="currentColor"/></svg>
+      </button>
+      <button id="collapse" class="icon-btn" title="Hide panel" aria-label="Hide panel">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M14.5 6.5 9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </header>
+
+    <div class="search">
+      <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15.5 15.5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="search" type="search" placeholder="Search places, events, people" autocomplete="off" spellcheck="false" aria-label="Search">
+      <ul id="results" class="results" role="listbox" hidden></ul>
+    </div>
+
+    <div id="filters" class="filters" role="group" aria-label="Categories"></div>
+
+    <section id="list-view" class="view">
+      <div class="list-head">
+        <div id="list-title" class="list-title"></div>
+        <div id="list-sub" class="list-sub"></div>
+      </div>
+      <ol id="list" class="list"></ol>
+    </section>
+
+    <section id="article-view" class="view" hidden>
+      <button id="back" class="back">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M14.5 6.5 9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Explore</span>
+      </button>
+      <article id="article" class="article"></article>
+    </section>
+  </aside>
+
+  <button id="expand" class="glass expand" title="Show panel" aria-label="Show panel" hidden>
+    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </button>
+
+  <!-- Map controls -->
+  <div class="controls">
+    <div class="glass ctl-group">
+      <button id="zoom-in" class="ctl" aria-label="Zoom in"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button id="zoom-out" class="ctl" aria-label="Zoom out"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="glass ctl-group">
+      <button id="layers-btn" class="ctl" aria-label="Map layers" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18"><path d="m12 3 9 5-9 5-9-5 9-5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 13 9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+    </div>
+    <div id="layers" class="glass popover layers" hidden>
+      <label class="toggle"><input type="checkbox" id="opt-borders"><span>Historical borders</span><i></i></label>
+      <label class="toggle"><input type="checkbox" id="opt-standing" checked><span>Places that existed</span><i></i></label>
+      <label class="toggle"><input type="checkbox" id="opt-globe" checked><span>Globe</span><i></i></label>
+      <p class="fine">Borders: <a href="https://github.com/aourednik/historical-basemaps" target="_blank" rel="noopener">historical-basemaps</a> (approximate)</p>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <section id="timeline" class="glass" aria-label="Timeline">
+    <div class="tl-row">
+      <button id="play" class="icon-btn play" aria-label="Play through time" title="Play through time">
+        <svg class="i-play" viewBox="0 0 24 24" width="18" height="18"><path d="M8 5.5v13l10.5-6.5L8 5.5Z" fill="currentColor"/></svg>
+        <svg class="i-pause" viewBox="0 0 24 24" width="18" height="18"><rect x="7" y="5.5" width="3.6" height="13" rx="1" fill="currentColor"/><rect x="13.4" y="5.5" width="3.6" height="13" rx="1" fill="currentColor"/></svg>
+      </button>
+      <div class="tl-year">
+        <input id="year-input" class="year-input" aria-label="Year" spellcheck="false" autocomplete="off">
+        <div id="tl-range" class="tl-range"></div>
+      </div>
+      <div class="tl-spacer"></div>
+      <label class="span-select" title="Time window">
+        <span>Window</span>
+        <select id="span">
+          <option value="auto">Auto</option>
+          <option value="0">Exact year</option>
+          <option value="1">±1 yr</option>
+          <option value="5">±5 yrs</option>
+          <option value="10">±10 yrs</option>
+          <option value="25">±25 yrs</option>
+          <option value="50">±50 yrs</option>
+          <option value="100">±100 yrs</option>
+        </select>
+      </label>
+      <button id="journeys-btn" class="pill-btn" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" fill="currentColor"/></svg>
+        <span>Journeys</span>
+      </button>
+    </div>
+    <div id="track" class="track" role="slider" tabindex="0" aria-label="Year" aria-valuemin="-10000" aria-valuemax="2026">
+      <canvas id="hist"></canvas>
+      <div id="window" class="window"></div>
+      <div id="handle" class="handle"></div>
+      <div id="ticks" class="ticks"></div>
+    </div>
+    <div id="journeys" class="popover journeys glass" hidden></div>
+  </section>
+
+  <div id="hovercard" class="hovercard" hidden></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
