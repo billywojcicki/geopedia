@@ -1,0 +1,774 @@
+// Geopedia: wires the data store, map, pins, timeline and sidebar together.
+
+import { CATEGORIES, KIND, KIND_VERB, JOURNEYS, DEFAULT_VIEW, STANDING_ZOOM, MIN_YEAR, MAX_YEAR, autoSpan } from './config.js';
+import {
+  $, el, clamp, fmtYear, fmtRange, parseYear, catColor, metaLine,
+  thumbUrl, wikiImg, wikiUrl, debounce, throttle, distKm,
+} from './util.js';
+import { Store, normalize } from './data.js';
+import { buildStyle, applyAge, ageFor, themeName } from './basemap.js';
+import { Timeline } from './timeline.js';
+import { Pins } from './pins.js';
+import { fetchSummary, fetchArticle } from './wiki.js';
+import { Borders } from './borders.js';
+
+const store = new Store();
+const state = {
+  year: DEFAULT_VIEW.year,
+  spanMode: DEFAULT_VIEW.span, // 'auto' | number
+  cats: new Set(CATEGORIES.map((_, i) => i)),
+  standing: true,
+  globe: true,
+  borders: false,
+  selected: null,
+};
+let map, pins, timeline, borders;
+let candidates = []; // current window, sorted by priority
+let tileKeys = [];
+let theme = themeName();
+
+const span = () => (state.spanMode === 'auto' ? autoSpan(state.year) : state.spanMode);
+const range = () => [state.year - span(), state.year + span()];
+
+// ---------------------------------------------------------------------------
+// Boot
+
+async function init() {
+  readHash();
+  // Phones start with the panel tucked away so the map has room.
+  if (innerWidth <= 860) { document.body.classList.add('collapsed'); $('#expand').hidden = false; }
+  toast('Loading history…', true);
+  await store.init();
+
+  timeline = new Timeline({
+    hist: store.index.hist,
+    onInput: (y, dragging) => setYear(y, { dragging }),
+  });
+  buildFilters();
+  buildJourneys();
+  bindChrome();
+
+  map = new maplibregl.Map({
+    container: 'map',
+    style: await buildStyle(theme, { globe: state.globe }),
+    center: state.center || DEFAULT_VIEW.center,
+    zoom: state.zoom ?? DEFAULT_VIEW.zoom,
+    attributionControl: { compact: true, customAttribution: 'Data: <a href="https://www.wikidata.org" target="_blank">Wikidata</a> &amp; <a href="https://en.wikipedia.org" target="_blank">Wikipedia</a> (CC BY-SA)' },
+    maxPitch: 0,
+    dragRotate: false,
+    pitchWithRotate: false,
+    renderWorldCopies: true,
+  });
+  map.touchZoomRotate.disableRotation();
+  // Start with attribution folded into its (i) button.
+  map.once('idle', () => document.querySelector('.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show'));
+  pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: r => select(r) });
+  borders = new Borders(map);
+
+  await new Promise(res => map.once('load', res));
+  styleReady = true;
+  window.geopedia = { map, store, state, get candidates() { return candidates; } }; // for devtools
+  addLayers();
+  syncPadding();
+  new ResizeObserver(syncPadding).observe($('#timeline'));
+  map.on('move', throttle(placePins, 120));
+  map.on('moveend', onMoveEnd);
+  map.on('click', () => hideHover());
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async e => {
+    theme = e.matches ? 'dark' : 'light';
+    styleReady = false;
+    map.setStyle(await buildStyle(theme, { globe: state.globe }));
+    map.once('styledata', () => {
+      styleReady = true;
+      addLayers();
+      updateDots();
+      applyAge(map, theme, lastAge = ageFor(state.year));
+      borders.restore();
+    });
+  });
+
+  setYear(state.year, { initial: true });
+  loadStandingTiles();
+  if (state.pendingSelect) openEntry({ id: state.pendingSelect }, { fly: false });
+}
+
+// ---------------------------------------------------------------------------
+// Time
+
+let lastAge = -1;
+let styleReady = false;
+let loadSeq = 0;
+
+function setYear(y, { dragging = false, initial = false } = {}) {
+  state.year = clamp(Math.round(y), MIN_YEAR, MAX_YEAR);
+  const [a, b] = range();
+  timeline.set(state.year, [a, b]);
+  if (document.activeElement !== $('#year-input')) $('#year-input').value = fmtYear(state.year);
+  sizeYearInput();
+  $('#tl-range').innerHTML = span() === 0 ? 'Exact year' : `<b>${fmtRange(a, b)}</b>`;
+
+  const age = Math.round(ageFor(state.year) * 50) / 50;
+  if (age !== lastAge && styleReady) { lastAge = age; applyAge(map, theme, age); }
+  if (state.borders) borders.setYear(state.year, dragging);
+
+  const seq = ++loadSeq;
+  if (store.hasWindow(a, b)) {
+    recompute();
+    if (!dragging) store.prefetchAround(a, b);
+  } else {
+    if (!initial) toast('Loading…', true);
+    store.loadWindow(a, b).then(() => {
+      if (seq !== loadSeq) return;
+      hideToast();
+      recompute();
+      store.prefetchAround(a, b);
+    }).catch(err => toast(`Couldn't load data (${err.message})`));
+    if (!initial) recompute(); // show whatever is already loaded meanwhile
+  }
+  if (initial) store.loadWindow(a, b).then(hideToast, () => {});
+  writeHash();
+}
+
+function sizeYearInput() {
+  const i = $('#year-input');
+  i.style.width = `${Math.max(4, i.value.length) * 0.62 + 0.4}em`;
+}
+
+// ---------------------------------------------------------------------------
+// Candidates: everything visible in the current window, by priority.
+
+function priority(r) {
+  // Places that merely existed rank below things that happened.
+  if (r.standing) return r.isNew ? r.score : r.score * 0.35;
+  // Long spans (wars, eras, civilisations) are less about this moment.
+  const len = r.end - r.start;
+  return len > 10 ? r.score / Math.sqrt(1 + len / 40) : r.score;
+}
+
+function recompute() {
+  if (!map) return;
+  const [a, b] = range();
+  const out = [];
+  const seen = new Set();
+  for (const r of store.happenings(a, b)) {
+    if (!state.cats.has(r.cat) || seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  if (state.standing && map.getZoom() >= STANDING_ZOOM - 0.5) {
+    for (const r of store.standing(a, b, tileKeys)) {
+      if (!state.cats.has(r.cat) || seen.has(r.id)) continue;
+      seen.add(r.id);
+      r.isNew = r.start >= a;
+      out.push(r);
+    }
+  }
+  for (const r of out) r.prio = priority(r);
+  out.sort((x, y) => y.prio - x.prio);
+  candidates = out;
+  updateDots();
+  placePins();
+  updateList();
+}
+
+// ---------------------------------------------------------------------------
+// Map layers
+
+function addLayers() {
+  if (!map.getSource('items')) {
+    map.addSource('items', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  }
+  const color = ['match', ['get', 'c'], ...CATEGORIES.flatMap((c, i) => [i, cssVar(`--c-${c.id}`)]), '#888'];
+  const standingColor = cssVar('--c-standing');
+  map.addLayer({
+    id: 'dots', type: 'circle', source: 'items',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'],
+        1, ['+', 1.3, ['*', 0.13, ['sqrt', ['get', 's']]]],
+        6, ['+', 2.2, ['*', 0.2, ['sqrt', ['get', 's']]]],
+        12, ['+', 3.5, ['*', 0.28, ['sqrt', ['get', 's']]]]],
+      'circle-color': ['case', ['==', ['get', 'st'], 1], standingColor, color],
+      'circle-opacity': ['case', ['==', ['get', 'st'], 1], 0.55, 0.8],
+      'circle-stroke-color': theme === 'dark' ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.9)',
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 2, 0, 6, 0.8, 12, 1.2],
+      'circle-pitch-alignment': 'map',
+    },
+  });
+  map.on('mousemove', 'dots', e => {
+    const f = e.features[0];
+    const r = candidates[f.id];
+    if (!r) return;
+    map.getCanvas().style.cursor = 'pointer';
+    showHover(r, null, e.point);
+  });
+  map.on('mouseleave', 'dots', () => { map.getCanvas().style.cursor = ''; hideHover(); });
+  map.on('click', 'dots', e => {
+    const r = candidates[e.features[0].id];
+    if (r) { e.preventDefault(); select(r); }
+  });
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function updateDots() {
+  const src = map?.getSource('items');
+  if (!src) return;
+  src.setData({
+    type: 'FeatureCollection',
+    features: candidates.map((r, i) => ({
+      type: 'Feature', id: i,
+      geometry: { type: 'Point', coordinates: [r.lng, r.lat] },
+      properties: { c: r.cat, s: r.prio, st: r.standing && !r.isNew ? 1 : 0 },
+    })),
+  });
+}
+
+function placePins() {
+  if (!map) return;
+  pins.place(candidates, state.selected, obstacles());
+}
+
+function onMoveEnd() {
+  placePins();
+  updateList();
+  writeHash();
+  loadStandingTiles();
+}
+
+// Load the spatial tiles of places that existed, once zoomed in far enough.
+function loadStandingTiles() {
+  if (!state.standing || map.getZoom() < STANDING_ZOOM - 0.5) {
+    if (tileKeys.length) { tileKeys = []; recompute(); }
+    return;
+  }
+  const b = map.getBounds();
+  const pad = 0.15;
+  const dw = (b.getEast() - b.getWest()) * pad, dh = (b.getNorth() - b.getSouth()) * pad;
+  const keys = store.tileKeys([b.getWest() - dw, b.getSouth() - dh, b.getEast() + dw, b.getNorth() + dh]).slice(0, 24);
+  const changed = keys.length !== tileKeys.length || keys.some((k, i) => k !== tileKeys[i]);
+  tileKeys = keys;
+  const missing = keys.filter(k => !Array.isArray(store.tiles.get(k)));
+  if (missing.length) {
+    Promise.all(missing.map(k => store.loadTile(k))).then(() => { if (tileKeys === keys) recompute(); }, () => {});
+  }
+  if (changed) recompute();
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar list
+
+const updateList = debounce(renderList, 120);
+
+function inView(r, b, globe) {
+  if (globe && map.getZoom() < 2.5) {
+    return !(map.transform.isLocationOccluded && map.transform.isLocationOccluded({ lng: r.lng, lat: r.lat }));
+  }
+  if (r.lat < b.getSouth() || r.lat > b.getNorth()) return false;
+  let lng = r.lng;
+  const w = b.getWest(), e = b.getEast();
+  if (e - w >= 360) return true;
+  if (lng < w) lng += 360; else if (lng > e) lng -= 360;
+  return lng >= w && lng <= e;
+}
+
+function renderList() {
+  if (!map) return;
+  const [a, b] = range();
+  const bounds = map.getBounds();
+  const globe = map.getProjection()?.type === 'globe';
+  const visible = candidates.filter(r => inView(r, bounds, globe));
+  $('#list-title').textContent = span() === 0 ? fmtYear(state.year) : fmtRange(a, b);
+  const zoomHint = map.getZoom() < STANDING_ZOOM - 0.5 && state.standing ? ' · zoom in for more' : '';
+  $('#list-sub').textContent = `${visible.length.toLocaleString()} ${visible.length === 1 ? 'article' : 'articles'} in view${zoomHint}`;
+  const list = $('#list');
+  if (!visible.length) {
+    list.replaceChildren(el('li', { class: 'list-empty' },
+      el('strong', {}, 'Nothing recorded here yet'),
+      'Try zooming out, moving the timeline, or widening the time window.'));
+    return;
+  }
+  const shown = visible.slice(0, 120);
+  list.replaceChildren(...shown.map(listItem));
+  if (visible.length > shown.length) {
+    list.append(el('li', { class: 'list-more' }, `Showing the ${shown.length} most notable. Zoom in to see more.`));
+  }
+}
+
+function listItem(r) {
+  const li = el('li', { style: `--c:${catColor(r.cat)}` },
+    thumb(r, 96),
+    el('div', { class: 'li-body' },
+      el('div', { class: 'li-title' }, r.title),
+      el('div', { class: 'li-meta' }, el('b', {}, metaLine(r))),
+      r.desc ? el('div', { class: 'li-desc' }, r.desc) : null,
+    ),
+  );
+  li.addEventListener('click', () => select(r, { fly: true }));
+  li.addEventListener('mouseenter', () => { pins.setHighlight(r.id); pulse(r); });
+  li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
+  return li;
+}
+
+function thumb(r, w) {
+  const t = el('div', { class: 'thumb', style: `--c:${catColor(r.cat)}` });
+  if (r.img) {
+    t.classList.add('has-img');
+    const img = wikiImg(r.img, w);
+    img.addEventListener('error', () => { if (!img.isConnected) t.classList.remove('has-img'); });
+    if (r.kind === KIND.BORN || r.kind === KIND.DIED) img.style.objectPosition = 'center 20%';
+    t.append(img);
+  }
+  return t;
+}
+
+let pulseMarker = null;
+function pulse(r) {
+  pulseMarker?.remove();
+  pulseMarker = null;
+  if (!r) return;
+  const node = el('div', { class: 'pin' }, el('div', { class: 'pulse', style: `--c:${catColor(r.cat)}` }));
+  pulseMarker = new maplibregl.Marker({ element: node, anchor: 'center', opacityWhenCovered: '0' }).setLngLat([r.lng, r.lat]).addTo(map);
+}
+
+// ---------------------------------------------------------------------------
+// Hover card
+
+let hoverTimer = null;
+
+function showHover(r, node, point) {
+  clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(() => {
+    const card = $('#hovercard');
+    const people = r.kind === KIND.BORN || r.kind === KIND.DIED;
+    card.className = `hovercard${people ? ' people' : ''}`;
+    card.style.setProperty('--c', catColor(r.cat));
+    card.replaceChildren(
+      r.img ? el('div', { class: 'hc-img', style: `background-image:url("${thumbUrl(r.img, 330)}")` }) : null,
+      el('div', { class: 'hc-body' },
+        el('div', { class: 'badge' }, el('span', { class: 'dot' }), categoryLabel(r)),
+        el('div', { class: 'hc-title' }, r.title),
+        el('div', { class: 'hc-date' }, metaLine(r)),
+        r.desc ? el('div', { class: 'hc-desc' }, r.desc) : null,
+        el('div', { class: 'hc-hint' }, 'Click to read'),
+      ),
+    );
+    card.hidden = false;
+    let x, y;
+    if (node) {
+      const rect = node.getBoundingClientRect();
+      x = rect.left + 30; y = rect.top - 20;
+    } else {
+      const c = map.getCanvas().getBoundingClientRect();
+      x = c.left + point.x + 14; y = c.top + point.y - 20;
+    }
+    const w = 280, h = card.offsetHeight;
+    if (x + w > innerWidth - 12) x -= w + 50;
+    card.style.left = `${clamp(x, 12, innerWidth - w - 12)}px`;
+    card.style.top = `${clamp(y, 12, innerHeight - h - 12)}px`;
+  }, node ? 90 : 40);
+}
+
+function hideHover() {
+  clearTimeout(hoverTimer);
+  $('#hovercard').hidden = true;
+}
+
+function categoryLabel(r) {
+  if (r.standing && !r.isNew) return 'Place';
+  return CATEGORIES[r.cat].name;
+}
+
+// ---------------------------------------------------------------------------
+// Article view
+
+let articleSeq = 0;
+
+function select(r, { fly = false } = {}) {
+  hideHover();
+  state.selected = r;
+  pins.setSelected(r.id);
+  showArticle(r);
+  if (fly) {
+    const z = Math.max(map.getZoom(), r.kind === KIND.EVENT ? 7 : 9);
+    map.flyTo({ center: [r.lng, r.lat], zoom: Math.min(z, 13), duration: 1400, essential: true });
+  } else {
+    placePins();
+  }
+  writeHash();
+}
+
+// Keep the map's visual centre in the part not covered by the panels.
+function syncPadding() {
+  if (!map) return;
+  const collapsed = document.body.classList.contains('collapsed');
+  const sb = $('#sidebar').getBoundingClientRect();
+  const tl = $('#timeline').getBoundingClientRect();
+  const sideSheet = !collapsed && sb.top < innerHeight / 3; // desktop: panel on the left
+  const left = sideSheet ? sb.right : 0;
+  let bottomEdge = tl.top;
+  if (!collapsed && !sideSheet) bottomEdge = Math.min(bottomEdge, sb.top);
+  map.setPadding({ top: 0, right: 0, left, bottom: Math.max(0, innerHeight - bottomEdge) });
+}
+
+// Screen rects that pins must not sit under.
+function obstacles() {
+  const out = [];
+  for (const id of ['sidebar', 'timeline']) {
+    if (id === 'sidebar' && document.body.classList.contains('collapsed')) continue;
+    const r = document.getElementById(id).getBoundingClientRect();
+    if (r.width && r.height) out.push([r.left, r.top, r.right, r.bottom]);
+  }
+  const c = $('.controls').getBoundingClientRect();
+  out.push([c.left, c.top, c.right, c.top + 140]);
+  return out;
+}
+
+function closeArticle() {
+  state.selected = null;
+  pins.setSelected(null);
+  $('#article-view').hidden = true;
+  $('#list-view').hidden = false;
+  placePins();
+  writeHash();
+}
+
+function showArticle(r) {
+  const seq = ++articleSeq;
+  document.body.classList.remove('collapsed');
+  $('#expand').hidden = true;
+  $('#list-view').hidden = true;
+  $('#article-view').hidden = false;
+  $('#article-view').scrollTop = 0;
+  const people = r.kind === KIND.BORN || r.kind === KIND.DIED;
+  const hero = r.img ? el('div', { class: `hero${people ? ' portrait' : ''}` }) : null;
+  if (hero) {
+    const img = wikiImg(r.img, 960, { loading: 'eager' });
+    img.addEventListener('load', () => img.classList.add('loaded'));
+    img.addEventListener('error', () => { if (!img.isConnected) hero.remove(); });
+    hero.append(img);
+  }
+  const prose = el('div', { class: 'prose' }, el('div', { class: 'skeleton' }), el('div', { class: 'skeleton' }), el('div', { class: 'skeleton short' }));
+  const readMore = el('button', { class: 'btn' }, 'Continue reading');
+  const article = $('#article');
+  article.style.setProperty('--c', catColor(r.cat));
+  article.replaceChildren(
+    hero,
+    el('div', { class: 'badge' }, el('span', { class: 'dot' }), categoryLabel(r)),
+    el('h2', {}, r.title),
+    el('div', { class: 'a-date' }, metaLine(r)),
+    r.desc ? el('p', { class: 'a-desc' }, r.desc) : null,
+    prose,
+    el('div', { class: 'a-actions' },
+      readMore,
+      el('a', { class: 'btn primary', href: wikiUrl(r.title), target: '_blank', rel: 'noopener' }, 'Open in Wikipedia ↗'),
+    ),
+    nearbySection(r),
+    el('p', { class: 'credit' }, 'Text from ', el('a', { href: wikiUrl(r.title), target: '_blank', rel: 'noopener' }, 'Wikipedia'),
+      ' under CC BY-SA 4.0. ', el('a', { href: `https://www.wikidata.org/wiki/Q${r.id}`, target: '_blank', rel: 'noopener' }, `Wikidata Q${r.id}`), '.'),
+  );
+
+  fetchSummary(r.title).then(s => {
+    if (seq !== articleSeq) return;
+    if (s?.extract_html) prose.innerHTML = s.extract_html;
+    else prose.replaceChildren(el('p', {}, r.desc || ''), el('p', { class: 'a-desc' }, 'Summary unavailable right now.'));
+    if (!r.img && s?.thumbnail?.source) {
+      const h = el('div', { class: 'hero' }, el('img', { src: s.thumbnail.source, alt: '', class: 'loaded' }));
+      article.prepend(h);
+    }
+  });
+  readMore.addEventListener('click', async () => {
+    readMore.disabled = true;
+    readMore.textContent = 'Loading…';
+    const html = await fetchArticle(r.title);
+    if (seq !== articleSeq) return;
+    if (html) { prose.innerHTML = html; readMore.remove(); }
+    else { readMore.textContent = 'Couldn’t load the article'; }
+  });
+}
+
+// Other things near this one in the current window.
+function nearbySection(r) {
+  const near = candidates
+    .filter(o => o.id !== r.id && Math.abs(o.lat - r.lat) < 1 && distKm(o, r) < 40)
+    .slice(0, 8);
+  if (!near.length) return null;
+  const [a, b] = range();
+  return el('div', {},
+    el('div', { class: 'section-title' }, `Nearby, ${fmtRange(a, b)}`),
+    el('ul', { class: 'nearby' }, near.map(o => {
+      const li = el('li', { style: `--c:${catColor(o.cat)}` }, thumb(o, 96),
+        el('div', { class: 'li-body' }, el('div', { class: 'li-title' }, o.title), el('div', { class: 'li-meta' }, el('b', {}, metaLine(o)))));
+      li.addEventListener('click', () => select(o, { fly: true }));
+      li.addEventListener('mouseenter', () => { pins.setHighlight(o.id); pulse(o); });
+      li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
+      return li;
+    })),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search, random, journeys
+
+async function search(q) {
+  const results = $('#results');
+  q = normalize(q.trim());
+  if (q.length < 2) { results.hidden = true; return; }
+  const entries = await store.loadSearch();
+  const words = q.split(/\s+/);
+  const scored = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (!words.every(w => e.norm.includes(w))) continue;
+    let s = e.norm === q ? 4 : e.norm.startsWith(q) ? 3 : (' ' + e.norm).includes(' ' + words[0]) ? 2 : 1;
+    scored.push([s * 1e6 - i, e]);
+    if (scored.length > 400) break;
+  }
+  scored.sort((x, y) => y[0] - x[0]);
+  const top = scored.slice(0, 8).map(x => x[1]);
+  results.replaceChildren(...(top.length ? top.map((e, i) => {
+    const li = el('li', { role: 'option', 'aria-selected': i === 0 ? 'true' : 'false', style: `--c:${catColor(e.cat)}` },
+      el('span', { class: 'dot' }), el('span', { class: 'r-title' }, e.title),
+      el('span', { class: 'r-meta' }, e.kind === KIND.EVENT ? fmtYear(e.start) : `${KIND_VERB[e.kind]} ${fmtYear(e.start)}`));
+    li.addEventListener('mousedown', ev => { ev.preventDefault(); chooseResult(e); });
+    li._entry = e;
+    return li;
+  }) : [el('li', { class: 'empty' }, 'No matches among notable articles')]));
+  results.hidden = false;
+}
+
+function chooseResult(e) {
+  $('#results').hidden = true;
+  $('#search').value = '';
+  $('#search').blur();
+  openEntry(e, { fly: true });
+}
+
+// Open an item known only by id + basics (search, random, shared link).
+async function openEntry(e, { fly }) {
+  if (e.lat == null) {
+    const all = await store.loadSearch();
+    const full = all.find(x => x.id === e.id);
+    if (!full) return;
+    e = full;
+  }
+  // Only move the timeline if the item isn't part of the current window.
+  const isPlace = e.kind >= KIND.BUILT && e.kind <= KIND.ESTABLISHED;
+  const [a, b] = range();
+  const inWindow = isPlace ? e.start <= b : e.start <= b && e.end >= a;
+  if (!inWindow) setYear(e.start);
+  if (fly) {
+    const z = isPlace ? 13 : e.kind === KIND.EVENT ? 8 : 9;
+    map.flyTo({ center: [e.lng, e.lat], zoom: z, duration: 1800, essential: true });
+  }
+  const [a2, b2] = range();
+  await store.loadWindow(a2, b2);
+  let rec = store.happenings(a2, b2).find(r => r.id === e.id);
+  if (!rec) {
+    const keys = store.tileKeys([e.lng, e.lat, e.lng, e.lat]);
+    const recs = (await Promise.all(keys.map(k => store.loadTile(k)))).flat();
+    rec = recs.find(r => r.id === e.id);
+    if (rec) rec.isNew = rec.start >= a2;
+  }
+  rec = rec || { ...e, score: 1, img: '', desc: '', date: fmtYear(e.start), place: '', standing: false };
+  select(rec);
+}
+
+async function randomPick() {
+  const all = await store.loadSearch();
+  const pool = all.slice(0, 6000).filter(e => state.cats.has(e.cat));
+  const e = pool[Math.floor(Math.random() * pool.length)];
+  if (e) openEntry(e, { fly: true });
+}
+
+function buildJourneys() {
+  const box = $('#journeys');
+  box.replaceChildren(...JOURNEYS.map(j => {
+    const b = el('button', {}, el('b', {}, j.name), el('small', {}, fmtYear(j.year)));
+    b.addEventListener('click', () => {
+      toggleJourneys(false);
+      state.spanMode = j.span;
+      syncSpanSelect();
+      setYear(j.year);
+      if (j.center) map.flyTo({ center: j.center, zoom: j.zoom, duration: 2200, essential: true });
+    });
+    return b;
+  }));
+}
+
+function toggleJourneys(open) {
+  const box = $('#journeys');
+  open = open ?? box.hidden;
+  box.hidden = !open;
+  $('#journeys-btn').setAttribute('aria-expanded', String(open));
+}
+
+function syncSpanSelect() {
+  const sel = $('#span');
+  const v = String(state.spanMode);
+  if (![...sel.options].some(o => o.value === v)) sel.append(el('option', { value: v }, `±${v} yrs`));
+  sel.value = v;
+}
+
+// ---------------------------------------------------------------------------
+// Chrome: filters, controls, timeline buttons, keyboard
+
+function buildFilters() {
+  $('#filters').replaceChildren(...CATEGORIES.map((c, i) => {
+    const b = el('button', { class: 'chip', 'aria-pressed': 'true', style: `--c:${catColor(i)}`, title: c.name },
+      el('span', { class: 'dot' }), c.short);
+    b.addEventListener('click', e => {
+      // Alt/Option-click: show only this category.
+      if (e.altKey) state.cats = new Set([i]);
+      else if (state.cats.has(i)) state.cats.delete(i); else state.cats.add(i);
+      [...$('#filters').children].forEach((x, j) => x.setAttribute('aria-pressed', String(state.cats.has(j))));
+      recompute();
+    });
+    return b;
+  }));
+}
+
+function bindChrome() {
+  $('#zoom-in').addEventListener('click', () => map.zoomIn());
+  $('#zoom-out').addEventListener('click', () => map.zoomOut());
+  $('#back').addEventListener('click', closeArticle);
+  const setCollapsed = c => {
+    document.body.classList.toggle('collapsed', c);
+    $('#expand').hidden = !c;
+    setTimeout(() => { syncPadding(); placePins(); }, 360);
+  };
+  $('#collapse').addEventListener('click', () => setCollapsed(true));
+  $('#expand').addEventListener('click', () => setCollapsed(false));
+  $('#random').addEventListener('click', randomPick);
+
+  const layersBtn = $('#layers-btn');
+  layersBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    const open = $('#layers').hidden;
+    $('#layers').hidden = !open;
+    layersBtn.setAttribute('aria-expanded', String(open));
+  });
+  $('#journeys-btn').addEventListener('click', e => { e.stopPropagation(); toggleJourneys(); });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#layers')) { $('#layers').hidden = true; layersBtn.setAttribute('aria-expanded', 'false'); }
+    if (!e.target.closest('#journeys')) toggleJourneys(false);
+  });
+
+  $('#opt-standing').addEventListener('change', e => { state.standing = e.target.checked; loadStandingTiles(); recompute(); });
+  $('#opt-globe').addEventListener('change', e => {
+    state.globe = e.target.checked;
+    map.setProjection({ type: state.globe ? 'globe' : 'mercator' });
+  });
+  $('#opt-borders').addEventListener('change', e => {
+    state.borders = e.target.checked;
+    borders.toggle(state.borders, state.year);
+  });
+
+  const sel = $('#span');
+  sel.addEventListener('change', () => {
+    state.spanMode = sel.value === 'auto' ? 'auto' : Number(sel.value);
+    setYear(state.year);
+  });
+
+  const yi = $('#year-input');
+  yi.addEventListener('focus', () => yi.select());
+  yi.addEventListener('input', sizeYearInput);
+  yi.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { yi.blur(); }
+    if (e.key === 'Escape') { yi.value = fmtYear(state.year); yi.blur(); }
+  });
+  yi.addEventListener('blur', () => {
+    const y = parseYear(yi.value);
+    if (y != null) setYear(y); else yi.value = fmtYear(state.year);
+    sizeYearInput();
+  });
+
+  // Play: move forward through time at a pace that suits the era.
+  let playTimer = null;
+  const play = () => {
+    if (playTimer) { clearInterval(playTimer); playTimer = null; $('#timeline').classList.remove('playing'); return; }
+    $('#timeline').classList.add('playing');
+    if (state.year >= MAX_YEAR - 1) setYear(MIN_YEAR);
+    playTimer = setInterval(() => {
+      const step = Math.max(1, Math.round(span() / 2));
+      if (state.year + step > MAX_YEAR) return play();
+      setYear(state.year + step);
+    }, 900);
+  };
+  $('#play').addEventListener('click', play);
+
+  const input = $('#search');
+  const doSearch = debounce(() => search(input.value), 110);
+  input.addEventListener('input', doSearch);
+  input.addEventListener('focus', () => { store.loadSearch(); if (input.value) search(input.value); });
+  input.addEventListener('blur', () => setTimeout(() => { $('#results').hidden = true; }, 120));
+  input.addEventListener('keydown', e => {
+    const items = [...$('#results').querySelectorAll('li[role=option]')];
+    const cur = items.findIndex(li => li.getAttribute('aria-selected') === 'true');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const n = clamp(cur + (e.key === 'ArrowDown' ? 1 : -1), 0, items.length - 1);
+      items.forEach((li, i) => li.setAttribute('aria-selected', String(i === n)));
+    } else if (e.key === 'Enter' && items[cur]) {
+      chooseResult(items[cur]._entry);
+    } else if (e.key === 'Escape') {
+      input.value = '';
+      $('#results').hidden = true;
+      input.blur();
+    }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input, select, textarea')) return;
+    if (e.key === '/') { e.preventDefault(); input.focus(); }
+    if (e.key === 'Escape' && state.selected) closeArticle();
+    if (e.key === '[' || e.key === ']') setYear(state.year + (e.key === ']' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// URL state: #y=1776&w=auto&m=41.2,-73.2,5.6&a=123
+
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const y = parseInt(p.get('y'), 10);
+  if (!Number.isNaN(y)) state.year = clamp(y, MIN_YEAR, MAX_YEAR);
+  const w = p.get('w');
+  if (w) state.spanMode = w === 'auto' ? 'auto' : clamp(parseInt(w, 10) || 0, 0, 1000);
+  const m = (p.get('m') || '').split(',').map(Number);
+  if (m.length === 3 && m.every(Number.isFinite)) { state.center = [m[1], m[0]]; state.zoom = m[2]; }
+  const a = parseInt(p.get('a'), 10);
+  if (a) state.pendingSelect = a;
+  if (state.spanMode !== 'auto') queueMicrotask(syncSpanSelect);
+}
+
+const writeHash = debounce(() => {
+  if (!map) return;
+  const c = map.getCenter();
+  const p = new URLSearchParams();
+  p.set('y', state.year);
+  p.set('w', state.spanMode);
+  p.set('m', `${c.lat.toFixed(4)},${c.lng.toFixed(4)},${map.getZoom().toFixed(2)}`);
+  if (state.selected) p.set('a', state.selected.id);
+  history.replaceState(null, '', '#' + p.toString().replace(/%2C/g, ','));
+}, 300);
+
+// ---------------------------------------------------------------------------
+// Toast
+
+let toastTimer = null;
+function toast(msg, spinner = false) {
+  const t = $('#toast');
+  t.replaceChildren(spinner ? el('span', { class: 'spinner' }) : null, msg);
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  if (!spinner) toastTimer = setTimeout(hideToast, 4000);
+}
+function hideToast() { $('#toast').hidden = true; }
+
+// Boot last, so every module-level binding above is initialised.
+init().catch(err => {
+  console.error(err);
+  toast(`Something went wrong loading the map: ${err.message}`);
+});

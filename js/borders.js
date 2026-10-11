@@ -1,0 +1,135 @@
+// Historical borders overlay from aourednik/historical-basemaps (GPL-3.0),
+// loaded on demand from jsDelivr. Snapshots are approximate and sparse; we show
+// the latest snapshot at or before the selected year.
+
+const BASE = 'https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/';
+const SNAPSHOTS = [
+  -123000, -10000, -8000, -5000, -4000, -3000, -2000, -1500, -1000, -700, -500, -400, -323, -300, -200, -100, -1,
+  100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1279, 1300, 1400, 1492, 1500, 1530, 1600, 1650,
+  1700, 1715, 1783, 1800, 1815, 1880, 1900, 1914, 1920, 1930, 1938, 1945, 1960, 1994, 2000, 2010,
+];
+const MODERN_LAYERS = /^(boundary_|label_country)/;
+
+function fileFor(y) {
+  return y < 0 ? `world_bc${-y}.geojson` : `world_${y}.geojson`;
+}
+
+function snapshotFor(year) {
+  let s = SNAPSHOTS[0];
+  for (const y of SNAPSHOTS) if (y <= year) s = y;
+  return s;
+}
+
+// Stable pastel per polity name.
+function hue(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+export class Borders {
+  constructor(map) {
+    this.map = map;
+    this.on = false;
+    this.snapshot = null;
+    this.cache = new Map();
+    this.timer = null;
+  }
+
+  toggle(on, year) {
+    this.on = on;
+    this.lastYear = year;
+    this.setModernVisible(!on);
+    if (on) this.setYear(year, false);
+    else this.removeLayers();
+  }
+
+  setYear(year, dragging) {
+    this.lastYear = year;
+    if (!this.on) return;
+    const s = snapshotFor(year);
+    if (s === this.snapshot) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.load(s), dragging ? 250 : 0);
+  }
+
+  async load(s) {
+    this.snapshot = s;
+    if (!this.cache.has(s)) {
+      this.cache.set(s, fetch(BASE + fileFor(s)).then(r => r.json()).then(gj => {
+        for (const f of gj.features) {
+          const n = f.properties.NAME || f.properties.SUBJECTO || '';
+          f.properties.h = hue(f.properties.SUBJECTO || n);
+          f.properties.label = n;
+        }
+        return gj;
+      }).catch(() => null));
+    }
+    const gj = await this.cache.get(s);
+    if (!gj || !this.on || this.snapshot !== s) return;
+    this.ensureLayers();
+    this.map.getSource('borders').setData(gj);
+  }
+
+  ensureLayers() {
+    const map = this.map;
+    if (map.getSource('borders')) return;
+    const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    map.addSource('borders', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, tolerance: 0.6 });
+    const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
+    const fill = ['to-color', ['concat', 'hsl(', ['to-string', ['get', 'h']], dark ? ', 35%, 45%)' : ', 55%, 62%)']];
+    map.addLayer({
+      id: 'borders-fill', type: 'fill', source: 'borders',
+      filter: ['!=', ['get', 'label'], ''],
+      paint: { 'fill-color': fill, 'fill-opacity': dark ? 0.2 : 0.16 },
+    }, firstSymbol);
+    map.addLayer({
+      id: 'borders-line', type: 'line', source: 'borders',
+      filter: ['!=', ['get', 'label'], ''],
+      paint: {
+        'line-color': dark ? 'rgba(235,235,245,0.45)' : 'rgba(60,50,40,0.45)',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 6, 1.2],
+      },
+    }, firstSymbol);
+    map.addLayer({
+      id: 'borders-label', type: 'symbol', source: 'borders',
+      filter: ['!=', ['get', 'label'], ''],
+      layout: {
+        'text-field': ['get', 'label'],
+        'text-font': ['Noto Sans Italic'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 13, 8, 15],
+        'text-transform': 'uppercase',
+        'text-letter-spacing': 0.1,
+        'text-max-width': 8,
+        'text-padding': 6,
+      },
+      paint: {
+        'text-color': dark ? 'rgba(235,235,245,0.75)' : 'rgba(70,55,40,0.8)',
+        'text-halo-color': dark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.8)',
+        'text-halo-width': 1.2,
+      },
+    });
+  }
+
+  removeLayers() {
+    const map = this.map;
+    for (const id of ['borders-label', 'borders-line', 'borders-fill']) if (map.getLayer(id)) map.removeLayer(id);
+    if (map.getSource('borders')) map.removeSource('borders');
+    this.snapshot = null;
+  }
+
+  setModernVisible(v) {
+    for (const l of this.map.getStyle().layers) {
+      if (MODERN_LAYERS.test(l.id)) this.map.setLayoutProperty(l.id, 'visibility', v ? 'visible' : 'none');
+    }
+  }
+
+  // After a style reload (theme change).
+  restore() {
+    if (!this.on) return;
+    this.snapshot = null;
+    this.setModernVisible(false);
+    const y = this.lastYear;
+    this.load(snapshotFor(y ?? 1800));
+  }
+}
