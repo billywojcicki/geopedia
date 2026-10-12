@@ -4,7 +4,7 @@
 // reveals the local ones.
 
 import { el, shortTitle, subline, thumbUrl, catColor } from './util.js';
-import { KIND } from './config.js';
+import { KIND, HAPPENED } from './config.js';
 
 const CELL = 48;
 const failed = new Set(); // images that couldn't be loaded this session
@@ -112,11 +112,18 @@ export class Pins {
     for (const [l, t, r, b] of obstacles) add([l - origin.left, t - origin.top, r - origin.left, b - origin.top]);
 
     if (forced) tryPlace(forced, true);
-    let scanned = 0;
+    // Things that happened lead; buildings, foundings and standing places get
+    // at most a third of the labels, even where events are scarce.
+    const maxMinor = Math.max(4, Math.round(maxPins / 3));
+    let scanned = 0, minor = 0;
     for (const r of candidates) {
       if (placed.length >= maxPins || ++scanned > 12000) break;
       if (forced && r.id === forced.id) continue;
+      const isMinor = !HAPPENED.has(r.kind);
+      if (isMinor && minor >= maxMinor) continue;
+      const n = placed.length;
       tryPlace(r, false);
+      if (isMinor && placed.length > n) minor++;
     }
     this.render(placed);
     return placed.length;

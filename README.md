@@ -110,45 +110,62 @@ Full Wikipedia text is tens of GB, so the static part is an index (title, place,
 
 **Source.** Wikidata, because it has what Wikipedia articles lack: structured coordinates and dates. Every item must have an English Wikipedia article.
 
-**What's on the map.** Three kinds of things:
+**What's on the map.** Events are the point; places and people are the backdrop.
 
-1. **Events** with a date (`point in time`, or `start`/`end time`) and a place (own coordinates, or the coordinates of their `location` if that's a city or site; events located only in a whole country or ocean are dropped because a centroid is meaningless). About 40k.
-2. **Places** with a founding date (`inception` or `opening date`): buildings, towns, institutions, historical states. They appear as a "Built / Founded / Established" event in their year, and when zoomed in they also appear (in grey) for every year they existed, until `dissolved/demolished` if known. About 250k.
-3. **People** with 25+ Wikipedia language editions: births and deaths at the birth/death place. About 80k.
+1. **Events** with a date (`point in time`, or `start`/`end time`) and a place. The place is, in order: the event's own coordinates; its `location` if that's a city or site; its `located in` (P131) district or city. Notable events (10+ language editions) known only by country, like reforms, crises and revolutions, are pinned on that country's capital and labelled with the country. National elections are left out of that fallback (they'd crowd every capital). About 38k.
+2. **Premieres and discoveries**: operas, plays and ballets at the theatre where they premiered, and scientific discoveries where they were made (not chemical elements "discovered in Sweden"). About 3.4k.
+3. **Places** with a founding date (`inception` or `opening date`): buildings, towns, institutions, historical states. They appear as a "Built / Founded / Established" event in their year, and when zoomed in they also appear (in grey) for every year they existed, until `dissolved/demolished` if known. About 250k.
+4. **People** with 25+ Wikipedia language editions: births and deaths at the birth/death place. About 80k. Off by default.
 
-**Categories.** Each item's Wikidata class is walked up the subclass tree to its *nearest* known root: battles, sieges, wars, massacres go to War & conflict; treaties, protests, revolutions, assassinations, elections to Politics & society; earthquakes, fires, accidents, epidemics to Disasters; festivals, exhibitions, expeditions, major sports to Culture & science. Nearest matters because Wikidata's tree is messy (a protest is, eventually, a "conflict"; Paris is, eventually, an "electoral unit").
+**Categories.** Each item's Wikidata class is walked up the subclass tree to its *nearest* known root. Nearest matters because Wikidata's tree is messy (a protest is, eventually, a "conflict"; Paris is, eventually, an "electoral unit"). On a tie, the more specific category wins over Politics, whose roots (meeting, ceremony) are broad.
 
-**Dropped as noise.** Sports seasons and matches (unless 40+ language editions, so World Cups and Olympics stay), award ceremonies, concert tours, eclipses, radio/TV stations, films, TV shows, languages, paintings and other artworks, modern countries (centroid coordinates), constituencies.
+| Category | What's in it |
+| --- | --- |
+| War & conflict | Battles, sieges, wars, raids, massacres, genocides, revolts, insurgencies, coups, military operations |
+| Politics & society | Treaties, revolutions, reforms, protests, strikes, social movements, elections, summits, councils, coronations, scandals, assassinations, economic crises and crashes |
+| Disasters | Earthquakes, eruptions, floods, fires, famines, epidemics, shipwrecks, air and rail accidents |
+| Arts & culture | Festivals, exhibitions, world's fairs, art movements, golden ages, premieres, the biggest sports events |
+| Science & discovery | Expeditions, experiments, discoveries, space missions, launches, nuclear tests |
+| Built & founded | Buildings, towns, institutions and states, in their founding year |
+| Births & deaths | Off by default |
+
+Events with no usable class get one from unambiguous title wording ("Battle of", "massacre", "mine disaster"); anything else unclassified shows under Politics & society.
+
+**Dropped as noise.** Sports seasons and matches, and other yearly editions (pageants, film festivals, championships, drafts), unless 40+ language editions, so World Cups and Olympics stay. Award ceremonies and honours lists, concert tours, eclipses, radio/TV stations, films, TV shows, languages, paintings and other artworks, currencies, newspapers, modern countries (centroid coordinates), constituencies, "List of" articles.
 
 **Ranking.** Importance = number of Wikipedia language editions with an article (sitelinks), times a weight per kind, times 1.15 if there's a photo:
 
 | Kind | Weight | Why |
 | --- | --- | --- |
 | War, politics | 1.0 | What the map is for |
-| Disasters, culture | 0.9 | |
+| Disasters, culture, science, discoveries | 0.9 | |
+| Premieres | 0.8 | |
 | Generic dated events | 0.75 | |
-| Notable buildings | 0.65 | |
-| Towns and cities | 0.3 | Every Wikipedia has an article on every city, so they'd swamp events |
-| Institutions | 0.3 | Same problem |
-| Deaths / births | 0.3 / 0.25 | Births mostly surface people famous decades later |
-| Schools, stations, firms, counties | 0.15 | Kept for local colour when zoomed in |
 | Big sports events | 0.5 | |
+| Notable buildings | 0.5 | |
+| Towns and cities | 0.25 | Every Wikipedia has an article on every city, so they'd swamp events |
+| Institutions | 0.25 | Same problem |
+| Deaths / births | 0.2 / 0.15 | Births mostly surface people famous decades later |
+| Schools, stations, firms, counties | 0.1 | Kept for local colour when zoomed in |
 
-On the map, places that merely existed rank at a third of their score, and long events (wars, eras) are discounted by their length so the specific beats the general.
+Premieres and discoveries count at most 60 language editions, so a famous opera or element doesn't outrank a war. On the map, buildings, foundings and people rank at 0.6 of their score and places that merely existed at 0.35; long events (wars, eras) are discounted by their length so the specific beats the general.
 
-**Zoom.** Pins are placed greedily in priority order and skipped if they'd overlap one already placed, so the most notable things win at world scale and local ones appear as you zoom in. Small dots show the rest of what is loaded for that zoom and window.
+**Zoom.** Pins are placed greedily in priority order and skipped if they'd overlap one already placed, so the most notable things win at world scale and local ones appear as you zoom in. Buildings, foundings, people and standing places get at most a third of the labels on screen, so events lead even in a city. Small dots show the rest of what is loaded for that zoom and window.
+
+The data tiles have their own budget per zoom: each 512px tile keeps its 8 most notable events per time slice, but only its 2 most notable places and people, and those only from 2 zoom levels deeper. At world zoom (z0-3) that's about 22k events, 2.7k places and 1.8k people (it used to be 8.6k, 25k and 19.5k).
 
 **Time window.** Default half-width by era: ±2 years after 1900, ±5 after 1700, ±10 after 1500, ±20 after 1000, ±40 after AD 1, wider before that.
 
-**Known gaps.** Things Wikidata lacks a date or coordinates for are missing (about 14k events are only located to a country). Sitelinks favour globally famous things over locally important ones, and Western topics over others. Births use the birthplace's city coordinates, so people stack on city centres. Pre-1500 coverage is thin.
+**Known gaps.** Things Wikidata lacks a date or coordinates for are missing (about 180k dated events have no usable place; the notable country-only ones are on capitals). Sitelinks favour globally famous things over locally important ones, and Western topics over others. Births use the birthplace's city coordinates, so people stack on city centres. Pre-1500 coverage is thin.
 
 ## Open questions
 
 Parked for later, to decide once we've used it more:
 
-1. Should People be off by default? It's the noisiest category (births mostly surface people famous decades later).
-2. More or fewer founding pins (towns, buildings) relative to events?
-3. Should older eras get more attention, e.g. a different time window, more Journeys, or a lower bar for inclusion before 1500?
+1. Should older eras get more attention, e.g. a different time window, more Journeys, or a lower bar for inclusion before 1500?
+2. More categories? Candidates: religion (councils, schisms, crusades, pilgrimages, currently split between Politics and War), economy and trade (crashes, trade routes, companies, now in Politics), exploration (voyages, now in Science), sport as its own filter (now folded into Culture).
+
+Decided: People is off by default; founding pins stay but are backdrop (capped share of labels, lower weight, a deeper zoom before they show).
 
 ## Credits
 

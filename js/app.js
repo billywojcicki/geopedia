@@ -1,6 +1,6 @@
 // Geopedia: wires the data store, map, pins, timeline and sidebar together.
 
-import { CATEGORIES, KIND, KIND_VERB, JOURNEYS, DEFAULT_VIEW, STANDING_ZOOM, MIN_YEAR, MAX_YEAR, autoSpan } from './config.js';
+import { CATEGORIES, KIND, KIND_VERB, HAPPENED, JOURNEYS, DEFAULT_VIEW, STANDING_ZOOM, MIN_YEAR, MAX_YEAR, autoSpan } from './config.js';
 import {
   $, el, setChildren, clamp, fmtYear, fmtRange, parseYear, catColor, metaLine,
   thumbUrl, wikiImg, wikiUrl, debounce, throttle, distKm,
@@ -17,7 +17,7 @@ const store = new Store();
 const state = {
   year: DEFAULT_VIEW.year,
   spanMode: DEFAULT_VIEW.span, // 'auto' | number
-  cats: new Set(CATEGORIES.map((_, i) => i)),
+  cats: new Set(CATEGORIES.flatMap((c, i) => (c.off ? [] : [i]))),
   standing: true,
   globe: true,
   borders: false,
@@ -236,7 +236,9 @@ function setLoading(on) {
 
 function priority(r) {
   // Places that merely existed rank below things that happened.
-  if (r.standing) return r.isNew ? r.score : r.score * 0.35;
+  if (r.standing) return r.isNew ? r.score * 0.6 : r.score * 0.35;
+  // Foundings, births and deaths give way to events of similar weight.
+  if (!HAPPENED.has(r.kind)) return r.score * 0.6;
   // Long spans (wars, eras, civilisations) are less about this moment.
   const len = r.end - r.start;
   return len > 10 ? r.score / Math.sqrt(1 + len / 40) : r.score;
@@ -728,7 +730,7 @@ function syncSpanSelect() {
 
 function buildFilters() {
   $('#filters').replaceChildren(...CATEGORIES.map((c, i) => {
-    const b = el('button', { class: 'chip', 'aria-pressed': 'true', style: `--c:${catColor(i)}`, title: c.name },
+    const b = el('button', { class: 'chip', 'aria-pressed': String(state.cats.has(i)), style: `--c:${catColor(i)}`, title: c.name },
       el('span', { class: 'dot' }), c.short);
     b.addEventListener('click', e => {
       // Alt/Option-click: show only this category.

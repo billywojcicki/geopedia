@@ -27,8 +27,9 @@
   --c-politics: #af52de;
   --c-disaster: #ff9500;
   --c-culture: #34c759;
+  --c-science: #00a3bf;
   --c-built: #007aff;
-  --c-people: #00a3bf;
+  --c-people: #a2845e;
   --c-standing: #8e8e93;
 
   color-scheme: light;
@@ -54,8 +55,9 @@
     --c-politics: #bf5af2;
     --c-disaster: #ff9f0a;
     --c-culture: #30d158;
+    --c-science: #40c8e0;
     --c-built: #0a84ff;
-    --c-people: #40c8e0;
+    --c-people: #ac8e68;
     --c-standing: #98989d;
     color-scheme: dark;
   }

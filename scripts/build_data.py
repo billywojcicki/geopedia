@@ -45,12 +45,18 @@ OUT = os.path.join(ROOT, "data")
 csv.field_size_limit(1 << 24)
 
 CAT = {c: i for i, c in enumerate(CATEGORIES)}
-# kind codes
-EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED = range(6)
+# kind codes (js/config.js KIND_VERB must match)
+EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED, PREMIERED, DISCOVERED = range(8)
+HAPPENED = {EVENT, PREMIERED, DISCOVERED}  # things that happened, as opposed to places and lives
 
 LONG_SPAN = 25  # years; longer happenings go to long.json
-LOD_K = 8  # happenings per 512px tile per time slice before the rest wait for a deeper zoom
+LOD_K = 8  # events per 512px tile per time slice before the rest wait for a deeper zoom
 LOD_MAX_Z = 8  # minzoom 8 means "8 or deeper"
+# Foundings, births and deaths get their own, smaller share of each tile and
+# only start showing a couple of zoom levels later, so the map leads with what
+# happened rather than who was born or what was built.
+LOD_K_OTHER = 2
+LOD_OTHER_OFFSET = 2
 # (name, lowest minzoom, highest minzoom, grid zoom, records per time chunk)
 TIERS = [
     ("a", 0, 3, 0, 1500),
@@ -68,19 +74,49 @@ WEIGHT = {
     "politics": 1.0,
     "disaster": 0.9,
     "culture": 0.9,
+    "science": 0.9,
     "sports": 0.5,
     "event": 0.75,  # dated event with no recognised class
+    "premiere": 0.8,
+    "discovery": 0.9,
     # Places and people collect sitelinks far more easily than events (every
-    # language edition has an article on every city), so they're scaled down
-    # to sit alongside events of similar historical weight.
-    "settlement": 0.3,
-    "structure": 0.65,
-    "institution": 0.3,
-    None: 0.4,  # place of unrecognised class
-    "low": 0.15,
-    "born": 0.25,  # births mostly show people who became famous decades later
-    "died": 0.3,
+    # language edition has an article on every city), and they're the backdrop
+    # rather than the story, so they're scaled well down.
+    "settlement": 0.25,
+    "structure": 0.5,
+    "institution": 0.25,
+    None: 0.3,  # place of unrecognised class
+    "low": 0.1,
+    "born": 0.15,  # births mostly show people who became famous decades later
+    "died": 0.2,
 }
+# Events with no usable "instance of" get a category from their title and
+# description when the wording is unambiguous ("Battle of...", "... mine disaster").
+GUESS_CAT = [
+    ("conflict", re.compile(r"\b(battle|siege|action of|raid|massacre|war|rebellion|uprising|revolt|invasion|"
+                            r"bombing|attack|skirmish|insurgency|mutiny|ambush|offensive|operation|campaign against|"
+                            r"naval engagement|sack of|capture of|fall of|liberation of|occupation of|pogrom|"
+                            r"shooting|assassination|terrorist|clash|clashes|coup|riot|riots|fighting|incursion)\b", re.I)),
+    ("disaster", re.compile(r"\b(disaster|earthquake|flood|fire|explosion|hurricane|typhoon|cyclone|tornado|"
+                            r"eruption|tsunami|famine|epidemic|pandemic|outbreak|plague|crash|derailment|"
+                            r"shipwreck|sinking|collapse|landslide|avalanche|blizzard|heat wave|drought|"
+                            r"accident|stampede|wreck)\b", re.I)),
+    # Editions of contests and shows: held to the sports bar (very notable only).
+    ("sports", re.compile(r"\b(championships?|grand prix|draft|tournament|cup|bowl|regatta|marathon|derby|"
+                          r"olympics|world series|playoffs?|rivalry|awards?|festival|pageant)\b", re.I)),
+]
+
+
+def guess_cat(title, desc):
+    text = f"{title} {desc}"
+    for cat, rx in GUESS_CAT:
+        if rx.search(text):
+            return cat
+    return None
+
+
+NATIONWIDE_MIN_SITELINKS = 10  # events known only by country must be this notable
+WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
 SPORTS_MIN_SITELINKS = 40
 MIN_FOUNDING_HAPPENING = 1.5  # roughly 3+ sitelinks for a building, 5+ for a town
 MIN_ESTABLISHED_HAPPENING = 3.0  # institutions, firms etc. need ~7+ sitelinks
@@ -236,6 +272,8 @@ def main():
     print("loading items…")
     items = {}
     for r in read("items"):
+        if r["title"].startswith("List of"):
+            continue
         i = qid(r["item"])
         items[i] = {"title": r["title"], "sl": int(r["sl"] or 0)}
 
@@ -255,11 +293,29 @@ def main():
             if excl is not None and excl < best_excl.get(i, 99):
                 best_excl[i] = excl
 
+    # National elections are known only by country and would crowd the
+    # capitals of the recent past: they don't get the country fallback.
+    def descends(c, target, depth=5):
+        frontier = {c}
+        for _ in range(depth):
+            if target in frontier:
+                return True
+            frontier = {p for x in frontier for p in parents.get(x, ())}
+        return target in frontier
+
+    election_classes = {c for c in parents if descends(c, "Q40231")} | {"Q40231"}
+    elections = {}
+    for r in read("classes"):
+        if r["cls"].rsplit("/", 1)[1] in election_classes:
+            elections[qid(r["item"])] = True
+
     def item_role(i):
         """Role of an item. Exclusion only wins when it's clearly the closer
-        match (Stanford is both a university and an open-access publisher)."""
+        match (Stanford is both a university and an open-access publisher), or
+        when the item is directly an excluded class and nothing kept is (an
+        award ceremony is also, one step up, a ceremony)."""
         keep, excl = best_keep.get(i), best_excl.get(i)
-        if excl is not None and (keep is None or excl < keep[0] - 1):
+        if excl is not None and (keep is None or excl < keep[0] - 1 or (excl == 0 and keep[0] > 0)):
             return "exclude"
         return keep[2] if keep else None
 
@@ -281,6 +337,30 @@ def main():
         pt = parse_point(r["c"])
         if pt:
             loccoords[i] = pt
+    # Events placed only by city/district.
+    for r in read("p131coords"):
+        i = qid(r["item"])
+        if i not in items or i in loccoords:
+            continue
+        pt = None if r["cap"] else parse_point(r["c"])
+        if pt:
+            loccoords[i] = pt
+    # Events placed only by country: pinned at the capital, labelled with the
+    # country. Events spanning several countries (world wars...) are skipped.
+    countries = defaultdict(dict)  # item -> country -> (point, label)
+    for r in read("countrycoords"):
+        i = qid(r["item"])
+        if i not in items or r["country"] in countries[i]:
+            continue
+        pt = parse_point(r["capc"]) or parse_point(r["cc"])
+        countries[i][r["country"]] = (pt, r["label"] or "")
+    nationwide = {}
+    for i, cs in countries.items():
+        if len(cs) == 1:
+            pt, label = next(iter(cs.values()))
+            if pt:
+                nationwide[i] = (pt, label)
+    del countries
 
     dates = defaultdict(lambda: defaultdict(list))
     for prop in ["P585", "P580", "P582", "P571", "P576", "P1619"]:
@@ -313,10 +393,19 @@ def main():
         bonus = IMAGE_BONUS if img else 1.0
 
         if not is_place:
+            if cat is None and role is None:
+                cat = guess_cat(it["title"], it.get("desc", ""))
+                if cat:
+                    stats[f"guessed:{cat}"] += 1
             if start_d is None:
                 stats["no_date"] += 1
                 continue
             pt = coords.get(i) or loccoords.get(i)
+            place = ""
+            if not pt and i in nationwide and cat and cat != "sports" and sl >= NATIONWIDE_MIN_SITELINKS \
+                    and not elections.get(i):
+                (pt, place) = nationwide[i]
+                stats["event:nationwide"] += 1
             if not pt:
                 stats["event_nocoord"] += 1
                 continue
@@ -328,7 +417,10 @@ def main():
             if end - start > 2000 or start > MAX_YEAR:
                 stats["bad_span"] += 1
                 continue
-            if pit_d and pit_d[3] >= 10:
+            # Multi-year events read as their span ("1789-1799"); otherwise the
+            # most precise single date.
+            ranged = start_d and end_d and best(ds.get("P580")) and best(ds.get("P582")) and end_d[0] != start_d[0]
+            if pit_d and pit_d[3] >= 10 and not ranged:
                 label = date_label(pit_d)
             else:
                 first = min((d for d in (start_d, end_d) if d), key=lambda d: d[0])
@@ -337,7 +429,7 @@ def main():
             disp = "culture" if cat in ("culture", "sports") else (cat or "politics")
             score = sl * WEIGHT[cat or "event"] * bonus
             happenings.append([i, it["title"], pt[0], pt[1], start, end, CAT[disp], EVENT,
-                               round(score, 1), img, it.get("desc", ""), label, ""])
+                               round(score, 1), img, it.get("desc", ""), label, place])
             stats[f"event:{cat}"] += 1
             continue
 
@@ -370,22 +462,41 @@ def main():
             standing.append(rec[:5] + [end] + rec[6:])
         stats[f"place:{role}"] += 1
 
-    print("people…")
-    for kind_name, kind in (("births", BORN), ("deaths", DIED)):
+    print("people, premieres, discoveries…")
+    found = set()
+    for kind_name, kind, cat, weight in (
+        ("births", BORN, "people", "born"),
+        ("deaths", DIED, "people", "died"),
+        ("premieres", PREMIERED, "culture", "premiere"),
+        ("discoveries", DISCOVERED, "science", "discovery"),
+    ):
         for r in read(kind_name):
             pt = parse_point(r["c"])
             d = parse_time(r["t"], r["prec"])
-            if not pt or not d:
+            if not pt or not d or r["title"].startswith("List of"):
                 continue
+            if r.get("cap"):
+                continue  # found/premiered somewhere as vague as a country
+            if kind in (PREMIERED, DISCOVERED):
+                # Sitelinks here measure the thing (oxygen, a symphony), not
+                # the moment it was found or first heard: cap them.
+                r["sl"] = str(min(int(r["sl"] or 0), WORK_MAX_SITELINKS))
             s0, s1 = span(d)
-            if s1 - s0 > 100:
+            if s1 - s0 > 100 or s0 > MAX_YEAR:
                 continue
             sl = int(r["sl"] or 0)
             img = commons_path(r["image"])
-            score = round(sl * WEIGHT["born" if kind == BORN else "died"] * (IMAGE_BONUS if img else 1), 1)
-            happenings.append([qid(r["item"]), r["title"], pt[0], pt[1], s0, s1, CAT["people"], kind,
+            score = round(sl * WEIGHT[weight] * (IMAGE_BONUS if img else 1), 1)
+            i = qid(r["item"])
+            if kind in (PREMIERED, DISCOVERED):
+                found.add(i)
+            happenings.append([i, r["title"], pt[0], pt[1], s0, s1, CAT[cat], kind,
                                score, img, clean_desc(r["desc"]), date_label(d), r["placeLabel"] or ""])
             stats[kind_name] += 1
+    # A found object or premiered work is shown where it happened, not as a
+    # "place" at the museum or theatre that holds it today.
+    happenings = [h for h in happenings if not (h[0] in found and h[7] not in HAPPENED)]
+    standing = [p for p in standing if p[0] not in found]
 
     for k, v in sorted(stats.items()):
         print(f"  {k}: {v}")
@@ -426,10 +537,10 @@ def tile_xy(lat, lng, z):
     return min(max(x, 0), n - 1), min(max(y, 0), n - 1)
 
 
-def assign_minzoom(recs, slice_key):
+def assign_minzoom(recs, slice_key, k=LOD_K, offset=0):
     """Append minzoom to each record: the first zoom where it ranks in the top
-    LOD_K of its tile within its time slice. Ranks only improve as tiles get
-    smaller, so the first zoom that admits a record admits it for good."""
+    k of its tile within its time slice (plus `offset`). Ranks only improve as
+    tiles get smaller, so the first zoom that admits a record admits it for good."""
     groups = defaultdict(list)
     for r in recs:
         groups[slice_key(r)].append(r)
@@ -440,12 +551,12 @@ def assign_minzoom(recs, slice_key):
             seen = Counter()
             for i, r in enumerate(group):
                 t = tile_xy(r[2], r[3], z)
-                if seen[t] < LOD_K:
+                if seen[t] < k:
                     seen[t] += 1
                     if mz[i] > z:
                         mz[i] = z
         for r, z in zip(group, mz):
-            r.append(z)
+            r.append(min(LOD_MAX_Z, z + offset))
 
 
 def chunk_by_start(recs, size):
@@ -489,8 +600,11 @@ def write(happenings, standing):
 
     short = [r for r in happenings if r[5] - r[4] <= LONG_SPAN]
     long_ = [r for r in happenings if r[5] - r[4] > LONG_SPAN]
-    assign_minzoom(short, lambda r: time_slice(r[4]))
-    assign_minzoom(long_, lambda r: 0)
+    happened = lambda r: r[7] in HAPPENED
+    assign_minzoom([r for r in short if happened(r)], lambda r: time_slice(r[4]))
+    assign_minzoom([r for r in short if not happened(r)], lambda r: time_slice(r[4]), LOD_K_OTHER, LOD_OTHER_OFFSET)
+    assign_minzoom([r for r in long_ if happened(r)], lambda r: 0)
+    assign_minzoom([r for r in long_ if not happened(r)], lambda r: 0, LOD_K_OTHER, LOD_OTHER_OFFSET)
 
     long_.sort(key=lambda r: -r[8])
     total += dump(os.path.join(OUT, "long.json"), long_)
