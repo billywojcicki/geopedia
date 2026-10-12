@@ -398,8 +398,10 @@ function renderList() {
   $('#list-sub').textContent = `${visible.length.toLocaleString()} ${visible.length === 1 ? 'article' : 'articles'} in view${zoomHint}`;
   // Events of these years spread over many places (the world wars, the
   // Napoleonic Wars), which have no pin: listed while one of their places is in view.
-  const world = store.world.filter(r => r.start <= b && r.end >= a && state.cats.has(r.cat)
-    && (r.pts.length ? r.pts.some(([lat, lng]) => inView({ lat, lng }, bounds, globe)) : true)).slice(0, 3);
+  // Short, sharp events beat long eras (the Middle Ages) at a given notability.
+  const world = store.world.filter(r => r.start <= b && r.end >= a && r.end - r.start <= WORLD_MAX_SPAN && state.cats.has(r.cat)
+    && (r.pts.length ? r.pts.some(([lat, lng]) => inView({ lat, lng }, bounds, globe)) : true))
+    .sort((x, y) => worldRank(y) - worldRank(x)).slice(0, 3);
   const strip = $('#list-world');
   strip.hidden = !world.length;
   setChildren(strip, world.map(r => {
@@ -424,6 +426,8 @@ function renderList() {
   }
 }
 
+const WORLD_MAX_SPAN = 400; // years; longer eras are periods, not events to point at
+const worldRank = r => r.score / (1 + Math.max(0, r.end - r.start - 30) / 60);
 const GLOBE_SVG = '<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5s1.2-6.1 3.8-8.5Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 
 // List rows act as buttons: focusable, and Enter or Space opens them.

@@ -19,6 +19,8 @@ ROOTS = {
         "Q831663",  # military campaign
         "Q180684",  # conflict
         "Q21480300",  # mass shooting (not a disaster)
+        "Q1520311",  # violent crime (Wikidata files it under "disaster")
+        "Q1933595",  # hijacking
         "Q13427116",  # peasant revolt (otherwise a riot, one step closer)
         "Q1323212",  # insurgency
         "Q350604",  # armed conflict
@@ -36,10 +38,14 @@ ROOTS = {
         "Q891854",  # bomb attack
         "Q41397",  # genocide
         "Q623179",  # state terrorism
+    "Q217327",  # suicide attack (otherwise a "suicide": a disaster)
+    "Q676324",  # armada (the Spanish Armada; otherwise an organization)
     ],
     "politics": [
         "Q131569",  # treaty
         "Q273120",  # protest
+    "Q175331",  # demonstration (otherwise an "organization")
+    "Q88178910",  # assassination attempt (otherwise a violent crime)
         "Q124757",  # riot
         "Q10931",  # revolution
         "Q3882219",  # assassination
@@ -52,7 +58,19 @@ ROOTS = {
         "Q132821",  # murder
         "Q2334719",  # legal case (Wikidata files it under "conflict")
         "Q59532",  # christianization (of a people or state)
+        "Q820655",  # statute (the Enabling Act, Constitutio Antoniniana)
+        "Q7748",  # law
+        "Q1156854",  # policy (Glasnost)
+        "Q1127126",  # military alliance
+        "Q100906234",  # multinational military coalition (the Triple Entente)
+        "Q3771738",  # instrument of surrender
+        "Q192909",  # scandal (Wikidata files these under "conflict")
+        "Q1255828",  # controversy
+        "Q1123131",  # disputation
+        "Q179875",  # debate
         "Q8016240",  # trial
+    "Q2282872", "Q669970",  # diet, Imperial Diet (the Diet of Worms; otherwise an organization)
+    "Q93288",  # contract (the Treaty of Waitangi)
         "Q16738832",  # criminal case
         "Q2761147",  # meeting
         "Q209715",  # coronation
@@ -91,8 +109,12 @@ ROOTS = {
         "Q8092",  # tropical cyclone
         "Q168247",  # famine
         "Q171558",  # accident
+        "Q3002150",  # aircraft crash
+        "Q81054",  # storm
+        "Q828827",  # power outage
     ],
     "culture": [
+        "Q188976",  # counterculture
         "Q132241",  # festival
         "Q464980",  # exhibition
         "Q172754",  # world's fair
@@ -100,6 +122,7 @@ ROOTS = {
         "Q465299",  # archaeological culture
         "Q968159",  # art movement
         "Q238526",  # golden age
+    "Q8432",  # civilization (the Zapotecs; otherwise just a "group of humans")
     ],
     "science": [
         "Q2401485",  # expedition
@@ -124,9 +147,24 @@ ROOTS = {
         "Q4504495",  # award ceremony
         "Q1573906",  # concert tour
         "Q3887",  # solar eclipse
+        "Q24706",  # Japanese era name (calendar periods, not events)
+        "Q16022392",  # edit-a-thon
+        "Q79786",  # Wikimedia meetup
+        "Q26132862",  # Olympic sports discipline event (the Games themselves stay)
+        "Q3010369",  # opening ceremony
+        "Q1156329",  # auto show
+        "Q1129398",  # fan convention
+        "Q548126",  # anime convention
+        "Q1958056",  # science fiction convention
+        "Q152450",  # municipal election
+        "Q15280243",  # mayoral election
+        "Q1057954",  # by-election
+        "Q6508670",  # leadership election
         "Q3464665",  # television series season
         "Q21191270",  # television series episode
         "Q220397",  # saros (eclipse series)
+    "Q482994",  # album
+    "Q1384330", "Q176799",  # expeditionary force, military unit (the Afrika Korps is not an expedition)
         "Q14350",  # radio station
         "Q1616075",  # television station
         "Q27971968",  # constituency of the House of Commons
@@ -173,6 +211,7 @@ ROOTS = {
         "Q47168",  # county of the United States
         "Q56061",  # administrative territorial entity (cities match "settlement" first)
         "Q82794",  # geographic region
+        "Q1076486",  # sports venue (stadiums; the Colosseum is an archaeological site first)
     ],
 }
 
@@ -211,4 +250,26 @@ ROOTS["exclude-weak"] = [
     "Q45400320",  # open-access publisher
     "Q1060829",  # broadcaster
     "Q9174",  # religion
+    "Q1445650", "Q57598", "Q18574943",  # holiday, national day, annual commemoration (the Battle of Preveza is Turkish Navy Day)
 ]
+
+# Dated items none of the roots claim are kept as events (and shown under
+# Politics), unless they are one of these: things, not things that happened.
+NOT_EVENTS = [
+    "Q17376908",  # languoid (languages, language families)
+    "Q15617994",  # administrative territorial entity type (Counties of Sweden)
+    "Q28872924",  # designation for an administrative territorial entity
+    "Q12737077", "Q528892", "Q28640", "Q16335296",  # occupation, profession
+    "Q4164871", "Q294414", "Q4189293",  # position, public office, title
+    "Q196600",  # media franchise (not "creative work": speeches and declarations are ones)
+    "Q15142894", "Q42314054", "Q3231690", "Q59773381",  # weapon, ammunition, automobile models
+    "Q6545185", "Q694554",  # unique identifier, emergency telephone number
+    "Q16334295", "Q17197366",  # group of humans, type of organization
+    "Q174984", "Q2095", "Q7239",  # signal, food, organism (not "product": speeches reach it)
+    "Q645466", "Q110055303", "Q59152282", "Q477544",  # national emblem, rocket model, streaming service, new religious movement
+]
+
+# Famous moments the denylist above would catch (the Wow! signal is a signal,
+# RDS-1 and the Tsar Bomba bombs, the Radium Girls a group of people), with
+# their category.
+KEEP_EVENTS = {"Q33297": "science", "Q586755": "science", "Q188596": "science", "Q1128589": "politics"}
