@@ -3,9 +3,11 @@
 //
 // - data/*.json?v=<version>: cache-first. The version is a hash of the build,
 //   so a file at a given URL never changes; old versions are dropped.
-// - Pinned MapLibre build, map tiles, fonts, sprites: cache-first (versioned
-//   URLs), with the tile cache trimmed so it can't grow without bound.
-// - The basemap style and tile index: stale-while-revalidate.
+// - vendor/<lib>@<version>/: cache-first (versioned path).
+// - basemap/: stale-while-revalidate (instant, refreshed in the background).
+// - OpenFreeMap tiles and fonts: cache-first (versioned URLs), with the tile
+//   cache trimmed so it can't grow without bound; its tile index is
+//   stale-while-revalidate.
 // - Everything else (the app itself, data/index.json, Wikipedia): network, so
 //   a new deploy is picked up on the next load.
 
@@ -26,11 +28,11 @@ self.addEventListener('fetch', e => {
   if (url.origin === location.origin) {
     const v = url.searchParams.get('v');
     if (v && url.pathname.includes('/data/')) e.respondWith(dataFile(req, v));
+    else if (url.pathname.includes('/vendor/')) e.respondWith(cacheFirst(LIB, req));
+    else if (url.pathname.includes('/basemap/')) e.respondWith(staleWhileRevalidate(LIB, req));
     return;
   }
-  if (url.hostname === 'unpkg.com' && /@\d+\.\d+\.\d+\//.test(url.pathname)) {
-    e.respondWith(cacheFirst(LIB, req));
-  } else if (url.hostname === 'tiles.openfreemap.org') {
+  if (url.hostname === 'tiles.openfreemap.org') {
     const versioned = /\.(pbf|png|jpg|webp|json)$/.test(url.pathname) && !url.pathname.startsWith('/styles/');
     e.respondWith(versioned ? cacheFirst(TILES, req, true) : staleWhileRevalidate(TILES, req));
   }

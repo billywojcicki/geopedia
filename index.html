@@ -12,13 +12,16 @@
 
   <!-- Speed: start the critical fetches before anything else loads. -->
   <script>
+    const json = url => fetch(url).then(r => r.json());
     window.__geopediaBoot = {
-      index: fetch('data/index.json').then(r => r.json()),
-      style: fetch('https://tiles.openfreemap.org/styles/positron').then(r => r.json()),
+      index: json('data/index.json'),
+      positron: json('basemap/positron.json'),
+      world: json('basemap/world.json'),
     };
   </script>
-  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+  <link rel="preload" href="basemap/fonts/noto-sans-regular/0-255.pbf" as="fetch" crossorigin>
   <link rel="preconnect" href="https://upload.wikimedia.org">
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
   <link rel="dns-prefetch" href="https://en.wikipedia.org">
   <link rel="modulepreload" href="js/app.js">
   <link rel="modulepreload" href="js/config.js">
@@ -32,7 +35,7 @@
 
   <link rel="stylesheet" href="css/app.css">
   <!-- Only the map needs this, and the map waits for its script anyway. -->
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="vendor/maplibre-gl@5.24.0/maplibre-gl.css" media="print" onload="this.media='all'">
 </head>
 <body>
   <div id="map" aria-label="Map"></div>
@@ -144,6 +147,6 @@
   <!-- The module runs first (document order) and starts loading data while
        MapLibre, the biggest download, is still arriving. -->
   <script type="module" src="js/app.js"></script>
-  <script defer id="maplibre-js" src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script defer id="maplibre-js" src="vendor/maplibre-gl@5.24.0/maplibre-gl.js"></script>
 </body>
 </html>
