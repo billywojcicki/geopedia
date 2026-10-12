@@ -80,6 +80,7 @@ WEIGHT = {
     "disaster": 0.9,
     "culture": 0.9,
     "science": 0.9,
+    "exploration": 0.9,
     "sports": 0.5,
     "event": 0.75,  # dated event with no recognised class
     "premiere": 0.8,
@@ -175,6 +176,7 @@ ROOT_MIN_SITELINKS = {
     "Q40231": 20,  # public election
     "Q29102902": 20,  # papal election
     "Q464980": 10,  # exhibition (the yearly Paris Salons and Royal Academy shows)
+    "Q24706": 25,  # Japanese era name (Meiji, Taishō, Shōwa, Heisei, Reiwa; not the 240 others)
 }
 # Crashes and wrecks: a start point is the departure airport or port, not the place.
 TRANSPORT_ROOTS = {"Q744913", "Q1078765", "Q3002150", "Q852190"}
@@ -214,16 +216,25 @@ def read(name, optional=False):
 
 def load_old_names():
     """Current name -> [(from, to, name of the time, box or None)] from
-    basemap/old-names.json, and East Germany's outline from the 1960 borders."""
+    basemap/old-names.json, and East Germany's outline from the 1886+ borders."""
     with open(os.path.join(ROOT, "basemap", "old-names.json"), encoding="utf-8") as f:
         table = json.load(f)
     names = defaultdict(list)
     for e in table["countries"] + table["cities"]:
         for n in e["names"]:
             names[n].extend((a, b, old, e.get("where")) for a, b, old in e["eras"])
-    with open(os.path.join(ROOT, "basemap", "borders", "1960.geojson"), encoding="utf-8") as f:
-        gdr = next(f["geometry"] for f in json.load(f)["features"] if f["properties"]["label"] == "East Germany")
-    names[None] = gdr["coordinates"] if gdr["type"] == "MultiPolygon" else [gdr["coordinates"]]
+    with open(os.path.join(ROOT, "basemap", "borders", "cshapes.json"), encoding="utf-8") as f:
+        topo = json.load(f)
+    arcs = []
+    for a in topo["arcs"]:
+        x = y = 0
+        pts = []
+        for i in range(0, len(a), 2):
+            x, y = x + a[i], y + a[i + 1]
+            pts.append((x / topo["q"], y / topo["q"]))
+        arcs.append(pts)
+    gdr = next(s for s in topo["shapes"] if s[0] == "East Germany" and s[2][0] <= 1960.5 < s[2][1])
+    names[None] = [[[p for i in ids for p in (arcs[i] if i >= 0 else arcs[~i][::-1])] for ids in poly] for poly in gdr[6]]
     return names
 
 
@@ -915,12 +926,12 @@ def main():
                 # (elections would crowd every capital). Not for expeditions or
                 # meetings, which happened anywhere but there.
                 if notable and (sl >= NATIONWIDE_MIN_SITELINKS and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS) or i in vital) \
-                        and cat != "science" and keep_root(i) != "Q2761147":
+                        and cat not in ("science", "exploration") and keep_root(i) != "Q2761147":
                     stats["event:nationwide"] += 1
                 else:
                     pt, place = None, ""
             elif how:
-                if notable and (sl >= (WIDE_VOYAGE_MIN_SITELINKS if cat == "science" else WORLDWIDE_MIN_SITELINKS) or i in vital):
+                if notable and (sl >= (WIDE_VOYAGE_MIN_SITELINKS if cat in ("science", "exploration") else WORLDWIDE_MIN_SITELINKS) or i in vital):
                     # Spread over places far apart: no pin, listed while in view.
                     place, pt, worldwide = wide_label(*how), centroid(how[0]), True
                     stats["event:wide"] += 1
@@ -1005,7 +1016,7 @@ def main():
         ("deaths", DIED, "people", "died"),
         ("premieres", PREMIERED, "culture", "premiere"),
         ("discoveries", DISCOVERED, "science", "discovery"),
-        ("launches", LAUNCHED, "science", "launch"),
+        ("launches", LAUNCHED, "exploration", "launch"),
         ("wrecks", SANK, "disaster", "wreck"),
     ):
         for r in read(kind_name):

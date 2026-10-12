@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build the self-hosted historical borders for the borders overlay.
 
+For 1886 onwards see scripts/build_cshapes.py (CShapes, year by year).
+
 Labels keep the source's names; the map shows them as names of their time
 (basemap/old-names.json: "USSR" as the Soviet Union, "Ghana" in 1930 as the
 Gold Coast).
@@ -29,14 +31,11 @@ OUT = os.path.join(ROOT, "basemap", "borders")
 SNAPSHOTS = [
     -123000, -10000, -8000, -5000, -4000, -3000, -2000, -1500, -1000, -700, -500, -400, -323, -300, -200, -100, -1,
     100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1279, 1300, 1400, 1492, 1500, 1530, 1600, 1650,
-    1700, 1715, 1783, 1800, 1815, 1880, 1900, 1914, 1920, 1930, 1938, 1945, 1960, 1994, 2000, 2010,
-]
+    1700, 1715, 1783, 1800, 1815, 1880,
+]  # from 1886 on, scripts/build_cshapes.py has every year
 
-# Fixes to the source: its 1930 world calls the whole Soviet Union "White
-# Russia" and keeps the Far Eastern Republic (merged in 1922). NAME -> (NAME, SUBJECTO).
-FIXES = {
-    1930: {"White Russia": ("USSR", "USSR"), "Far Eastern SSR": ("USSR", "USSR")},
-}
+# Fixes to the source, by snapshot: NAME -> (NAME, SUBJECTO).
+FIXES = {}
 
 DECIMALS = 2  # ~1 km
 TOLERANCE = 0.02  # degrees, about a pixel at zoom 5 (the outlines are approximate anyway)

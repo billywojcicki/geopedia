@@ -28,6 +28,7 @@
   --c-disaster: #ff9500;
   --c-culture: #34c759;
   --c-science: #00a3bf;
+  --c-exploration: #5856d6;
   --c-built: #007aff;
   --c-people: #a2845e;
   --c-standing: #8e8e93;
@@ -59,6 +60,7 @@
     --c-disaster: #ff9f0a;
     --c-culture: #30d158;
     --c-science: #40c8e0;
+    --c-exploration: #7d7aff;
     --c-built: #0a84ff;
     --c-people: #ac8e68;
     --c-standing: #98989d;
@@ -421,6 +423,7 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   width: min(560px, calc(100vw - 32px));
   display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 4px;
   padding: 10px;
+  max-height: calc(100vh - 170px); max-height: calc(100dvh - 170px); overflow-y: auto;
 }
 .journeys button { text-align: left; padding: 9px 12px; border-radius: 10px; }
 @media (hover: hover) { .journeys button:hover { background: var(--fill); } }
