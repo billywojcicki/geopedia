@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """Turn raw Wikidata CSVs (build/raw) into the static data files the site loads.
 
-Output (data/):
-  index.json        bucket + tile index, year histogram, metadata
-  h/<n>.json        "happenings" (events, foundings, births, deaths) bucketed by year
-  h/long.json       happenings spanning more than LONG_SPAN years (wars, eras)
-  p/<key>.json      "standing" places (buildings, towns...) in a spatial quadtree
-  search.json       compact title index of the most notable items
+The data is a level-of-detail pyramid, so each view downloads only what it can
+show. Every happening (event, founding, birth, death) gets a minzoom: the first
+map zoom at which it is among the LOD_K most notable things in its 512px tile
+and time slice. Records are then grouped by minzoom into tiers:
+
+  a/  minzoom 0-3   whole world, split into time chunks       (always loaded)
+  b/  minzoom 4-5   z2 map tiles, split into time chunks      (zoom >= 3)
+  c/  minzoom 6-7   z4 map tiles, split into time chunks      (zoom >= 5)
+  d/  minzoom 8+    spatial quadtree leaves, every era        (zoom >= 7)
+  p/  places that existed (standing), quadtree, every era     (zoom >= 8.5)
+  long.json         happenings spanning more than LONG_SPAN years
+  index.json        file index and data version
+  hist.json         happenings per year, for the timeline
+  search.json       title index of the most notable items, with file locations
 
 Record layout (arrays, to keep files small):
-  [qid, title, lat, lon, start, end, cat, kind, score, img, desc, date, place]
+  [qid, title, lat, lon, start, end, cat, kind, score, img, desc, date, place, minzoom]
   start/end are astronomical years (0 = 1 BC). img is "a/ab/File.jpg" (Commons
   hash path) or "". date is a human-readable date string. place is the
-  birth/death place label for people, else "".
+  birth/death place label for people, else "". Standing records have no minzoom.
 
 Usage: python3 scripts/build_data.py
 """
@@ -40,8 +48,16 @@ CAT = {c: i for i, c in enumerate(CATEGORIES)}
 # kind codes
 EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED = range(6)
 
-LONG_SPAN = 25  # years; longer happenings go to h/long.json
-BUCKET_TARGET = 4000  # happenings per bucket file
+LONG_SPAN = 25  # years; longer happenings go to long.json
+LOD_K = 8  # happenings per 512px tile per time slice before the rest wait for a deeper zoom
+LOD_MAX_Z = 8  # minzoom 8 means "8 or deeper"
+# (name, lowest minzoom, highest minzoom, grid zoom, records per time chunk)
+TIERS = [
+    ("a", 0, 3, 0, 1500),
+    ("b", 4, 5, 2, 2000),
+    ("c", 6, 7, 4, 1500),
+]
+DETAIL_MAX = 2000  # tier d records per quadtree leaf
 TILE_MAX = 2500  # standing places per quadtree leaf
 MIN_YEAR, MAX_YEAR = -10000, 2026
 
@@ -342,7 +358,7 @@ def main():
         score = round(sl * WEIGHT[role] * bonus, 1)
         rec = [i, it["title"], pt[0], pt[1], s0, s1, CAT["built"], kind, score, img,
                it.get("desc", ""), date_label(found_d), ""]
-        # Only notable foundings go in the global time buckets; minor ones still
+        # Only notable foundings become happenings; minor ones still
         # show up (and are marked as new) through the standing layer when zoomed in.
         # Vague foundings ("18th century") would sit in every window of the
         # century, so they only appear through the standing layer.
@@ -378,92 +394,191 @@ def main():
     write(happenings, standing)
 
 
+_digest = hashlib.sha1()
+
+
 def dump(path, obj):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
-    return os.path.getsize(path)
+    data = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    _digest.update(path.encode() + data)
+    return len(data)
+
+
+def time_slice(year):
+    """Slices for density limiting, finer where the record is denser."""
+    if year >= 1500:
+        return year
+    if year >= 1000:
+        return 100_000 + year // 5
+    if year >= 0:
+        return 200_000 + year // 10
+    return 300_000 + year // 50
+
+
+def tile_xy(lat, lng, z):
+    """Web Mercator tile containing a point."""
+    n = 1 << z
+    x = int((lng + 180) / 360 * n)
+    r = math.radians(max(-85.05, min(85.05, lat)))
+    y = int((1 - math.log(math.tan(r) + 1 / math.cos(r)) / math.pi) / 2 * n)
+    return min(max(x, 0), n - 1), min(max(y, 0), n - 1)
+
+
+def assign_minzoom(recs, slice_key):
+    """Append minzoom to each record: the first zoom where it ranks in the top
+    LOD_K of its tile within its time slice. Ranks only improve as tiles get
+    smaller, so the first zoom that admits a record admits it for good."""
+    groups = defaultdict(list)
+    for r in recs:
+        groups[slice_key(r)].append(r)
+    for group in groups.values():
+        group.sort(key=lambda r: -r[8])
+        mz = [LOD_MAX_Z] * len(group)
+        for z in range(LOD_MAX_Z):
+            seen = Counter()
+            for i, r in enumerate(group):
+                t = tile_xy(r[2], r[3], z)
+                if seen[t] < LOD_K:
+                    seen[t] += 1
+                    if mz[i] > z:
+                        mz[i] = z
+        for r, z in zip(group, mz):
+            r.append(z)
+
+
+def chunk_by_start(recs, size):
+    """Split records (sorted by start) into chunks of about `size`, never
+    splitting one start year across chunks."""
+    chunks, cur = [], []
+    for r in recs:
+        if len(cur) >= size and r[4] != cur[-1][4]:
+            chunks.append(cur)
+            cur = []
+        cur.append(r)
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def quadtree(recs, max_n, write_leaf):
+    """Split records into lng/lat quadtree leaves of at most max_n."""
+    def split(recs, x0, y0, x1, y1, key):
+        if len(recs) <= max_n or len(key) >= 14:
+            if recs:
+                write_leaf(key or "root", [x0, y0, x1, y1], recs)
+            return
+        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
+        quads = [[], [], [], []]
+        for r in recs:
+            quads[(1 if r[3] >= mx else 0) + (2 if r[2] < my else 0)].append(r)
+        split(quads[0], x0, my, mx, y1, key + "0")
+        split(quads[1], mx, my, x1, y1, key + "1")
+        split(quads[2], x0, y0, mx, my, key + "2")
+        split(quads[3], mx, y0, x1, my, key + "3")
+    split(recs, -180, -90, 180, 90, "")
 
 
 def write(happenings, standing):
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
-    os.makedirs(os.path.join(OUT, "h"))
-    os.makedirs(os.path.join(OUT, "p"))
+    os.makedirs(OUT)
+    total = 0
+    loc = {}  # id(record) -> file it lives in, for the search index
 
-    # Happenings: short ones bucketed by start year, long ones in one file.
-    happenings.sort(key=lambda r: (r[4], -r[8]))
     short = [r for r in happenings if r[5] - r[4] <= LONG_SPAN]
     long_ = [r for r in happenings if r[5] - r[4] > LONG_SPAN]
+    assign_minzoom(short, lambda r: time_slice(r[4]))
+    assign_minzoom(long_, lambda r: 0)
+
     long_.sort(key=lambda r: -r[8])
-    total = dump(os.path.join(OUT, "h", "long.json"), long_)
+    total += dump(os.path.join(OUT, "long.json"), long_)
+    for r in long_:
+        loc[id(r)] = "long"
 
-    buckets = []
-    cur = []
-    for r in short:
-        if len(cur) >= BUCKET_TARGET and r[4] != cur[-1][4]:
-            buckets.append(cur)
-            cur = []
-        cur.append(r)
-    if cur:
-        buckets.append(cur)
-    bucket_index = []
-    for n, b in enumerate(buckets):
-        b.sort(key=lambda r: -r[8])
-        total += dump(os.path.join(OUT, "h", f"{n}.json"), b)
-        bucket_index.append([b and min(r[4] for r in b), max(r[4] for r in b), len(b)])
+    tiers = {}
+    for name, zmin, zmax, gz, size in TIERS:
+        by_tile = defaultdict(list)
+        for r in short:
+            if zmin <= r[13] <= zmax:
+                by_tile[tile_xy(r[2], r[3], gz)].append(r)
+        tiles = {}
+        for (x, y), recs in sorted(by_tile.items()):
+            recs.sort(key=lambda r: (r[4], -r[8]))
+            entries = []
+            for i, chunk in enumerate(chunk_by_start(recs, size)):
+                chunk.sort(key=lambda r: -r[8])
+                path = f"{name}/{x}-{y}-{i}"
+                total += dump(os.path.join(OUT, path + ".json"), chunk)
+                entries.append([chunk_min(chunk), max(r[4] for r in chunk), len(chunk)])
+                for r in chunk:
+                    loc[id(r)] = path
+            tiles[f"{x}-{y}"] = entries
+        tiers[name] = {"zoom": gz, "minz": zmin, "tiles": tiles}
+        print(f"  tier {name}: {sum(len(v) for v in tiles.values())} files, "
+              f"{sum(e[2] for v in tiles.values() for e in v)} records")
 
-    # Standing places: quadtree split until leaves are small enough.
-    standing.sort(key=lambda r: -r[8])
-    tiles = []
+    detail = []
 
-    def split(recs, x0, y0, x1, y1, key):
+    def write_detail(key, bbox, recs):
         nonlocal total
-        if len(recs) <= TILE_MAX or len(key) >= 14:
-            if recs:
-                total += dump(os.path.join(OUT, "p", f"{key or 'root'}.json"), recs)
-                tiles.append([key or "root", x0, y0, x1, y1, len(recs)])
-            return
-        mx, my = (x0 + x1) / 2, (y0 + y1) / 2
-        quads = [[], [], [], []]
+        recs.sort(key=lambda r: -r[8])
+        total += dump(os.path.join(OUT, "d", f"{key}.json"), recs)
+        detail.append([key, *bbox, len(recs)])
         for r in recs:
-            q = (1 if r[3] >= mx else 0) + (2 if r[2] < my else 0)
-            quads[q].append(r)
-        split(quads[0], x0, my, mx, y1, key + "0")
-        split(quads[1], mx, my, x1, y1, key + "1")
-        split(quads[2], x0, y0, mx, my, key + "2")
-        split(quads[3], mx, y0, x1, my, key + "3")
+            loc[id(r)] = f"d/{key}"
 
-    split(standing, -180, -90, 180, 90, "")
+    deep = [r for r in short if r[13] > TIERS[-1][2]]
+    quadtree(deep, DETAIL_MAX, write_detail)
+    print(f"  tier d: {len(detail)} files, {len(deep)} records")
+
+    places = []
+
+    def write_places(key, bbox, recs):
+        nonlocal total
+        recs.sort(key=lambda r: -r[8])
+        total += dump(os.path.join(OUT, "p", f"{key}.json"), recs)
+        places.append([key, *bbox, len(recs)])
+
+    quadtree(standing, TILE_MAX, write_places)
+    print(f"  standing: {len(places)} files, {len(standing)} records")
 
     # Year histogram for the timeline (short + long happenings by start year).
     hist = Counter()
     for r in happenings:
         hist[max(MIN_YEAR, min(MAX_YEAR, r[4]))] += 1
+    total += dump(os.path.join(OUT, "hist.json"), {
+        "min": MIN_YEAR, "max": MAX_YEAR, "counts": [hist.get(y, 0) for y in range(MIN_YEAR, MAX_YEAR + 1)]})
 
-    # Search index: the most notable items of all kinds.
+    # Search index: the most notable items, with the file holding each.
     seen = set()
     search = []
     for r in sorted(happenings, key=lambda r: -r[8]):
         if r[0] in seen:
             continue
         seen.add(r[0])
-        search.append([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]])
+        search.append([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], loc[id(r)]])
         if len(search) >= 40000:
             break
     total += dump(os.path.join(OUT, "search.json"), search)
 
     index = {
-        "version": 1,
+        "version": _digest.hexdigest()[:10],
         "categories": CATEGORIES,
         "longSpan": LONG_SPAN,
-        "buckets": bucket_index,
-        "tiles": tiles,
-        "hist": {"min": MIN_YEAR, "max": MAX_YEAR,
-                 "counts": [hist.get(y, 0) for y in range(MIN_YEAR, MAX_YEAR + 1)]},
+        "tiers": tiers,
+        "detailMinz": TIERS[-1][2] + 1,
+        "detail": detail,
+        "standing": places,
         "counts": {"happenings": len(happenings), "standing": len(standing)},
     }
     total += dump(os.path.join(OUT, "index.json"), index)
-    print(f"buckets: {len(buckets)}  long: {len(long_)}  tiles: {len(tiles)}  total: {total / 1e6:.1f} MB")
+    print(f"version {index['version']}  total: {total / 1e6:.1f} MB")
+
+
+def chunk_min(chunk):
+    return min(r[4] for r in chunk)
 
 
 if __name__ == "__main__":

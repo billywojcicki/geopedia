@@ -8,8 +8,31 @@
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <!-- Speed: start the critical fetches before anything else loads. -->
+  <script>
+    window.__geopediaBoot = {
+      index: fetch('data/index.json').then(r => r.json()),
+      style: fetch('https://tiles.openfreemap.org/styles/positron').then(r => r.json()),
+    };
+  </script>
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+  <link rel="preconnect" href="https://upload.wikimedia.org">
+  <link rel="dns-prefetch" href="https://en.wikipedia.org">
+  <link rel="modulepreload" href="js/app.js">
+  <link rel="modulepreload" href="js/config.js">
+  <link rel="modulepreload" href="js/util.js">
+  <link rel="modulepreload" href="js/data.js">
+  <link rel="modulepreload" href="js/basemap.js">
+  <link rel="modulepreload" href="js/timeline.js">
+  <link rel="modulepreload" href="js/pins.js">
+  <link rel="modulepreload" href="js/wiki.js">
+  <link rel="modulepreload" href="js/borders.js">
+
   <link rel="stylesheet" href="css/app.css">
+  <!-- Only the map needs this, and the map waits for its script anyway. -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" media="print" onload="this.media='all'">
 </head>
 <body>
   <div id="map" aria-label="Map"></div>
@@ -85,6 +108,7 @@
       <div class="tl-year">
         <input id="year-input" class="year-input" aria-label="Year" spellcheck="false" autocomplete="off">
         <div id="tl-range" class="tl-range"></div>
+        <span class="tl-spin spinner" aria-hidden="true"></span>
       </div>
       <div class="tl-spacer"></div>
       <label class="span-select" title="Time window">
@@ -117,7 +141,9 @@
   <div id="hovercard" class="hovercard" hidden></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <!-- The module runs first (document order) and starts loading data while
+       MapLibre, the biggest download, is still arriving. -->
   <script type="module" src="js/app.js"></script>
+  <script defer id="maplibre-js" src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
 </body>
 </html>
