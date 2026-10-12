@@ -11,6 +11,7 @@ import { Timeline } from './timeline.js';
 import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
 import { Borders } from './borders.js';
+import { applyOldNames, loadOldNames } from './oldnames.js';
 import { Sheet } from './sheet.js';
 import { rankSearch } from './search.js';
 
@@ -128,6 +129,7 @@ function onStyleLoad() {
   updateDots();
   applyAge(map, theme, lastAge = ageFor(state.year));
   borders.restore();
+  loadOldNames().then(() => { if (styleReady) applyOldNames(map, state.year); });
 }
 
 // The phone sheet moved: body classes drive the CSS, then the map padding and
@@ -160,10 +162,11 @@ function registerServiceWorker() {
 let lastAge = -1;
 let styleReady = false;
 
-// Historical borders are on by default before 1900, when today's borders
-// mislead; the Layers toggle overrides that for the session. They wait for the
-// map's first idle so they never slow down the first view.
-const AUTO_BORDERS_BEFORE = 1900;
+// Historical borders are on by default before 1992, when today's borders and
+// names mislead (no Russia in 1960: the Soviet Union); the Layers toggle
+// overrides that for the session. They wait for the map's first idle so they
+// never slow down the first view.
+const AUTO_BORDERS_BEFORE = 1992;
 let bordersReady = false;
 function syncBorders(dragging = false) {
   const on = state.borders ?? state.year < AUTO_BORDERS_BEFORE;
@@ -184,6 +187,7 @@ function setYear(y, { dragging = false } = {}) {
   const age = Math.round(ageFor(state.year) * 50) / 50;
   if (age !== lastAge && styleReady) { lastAge = age; applyAge(map, theme, age); }
   syncBorders(dragging);
+  if (styleReady) applyOldNames(map, state.year);
   // Prefetch only once the map is up, so it never competes with the first view.
   if (!dragging && map) store.prefetchAround(currentView());
   scheduleUpdate();
