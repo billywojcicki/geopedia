@@ -149,7 +149,9 @@ NATIONWIDE_MIN_SITELINKS = 10  # events known only by country must be this notab
 ELECTION_MIN_SITELINKS = 40  # national elections too (they'd crowd every capital)
 WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
 THING_WEIGHT = 0.3  # found, premiered or launched things that aren't moments
-LAUNCH_MIN_SITELINKS = 25
+LAUNCH_MIN_SITELINKS = 18  # probes, landers and firsts (Pioneer 5, IM-1, Mercury-Redstone 2)
+ROUTINE_LAUNCH_MIN_SITELINKS = 25  # crew rotations and shuttle flights: the famous ones only
+ROUTINE_CREWED = re.compile(r"^(Soyuz (\d+|T-\d+|TM-\d+|TMA-\d+M?|MS-\d+)|STS-\d+|SpaceX Crew-\d+|Shenzhou 1\d|Axiom Mission [2-9])$")
 WRECK_MIN_SITELINKS = 20  # the Lusitania and the Bismarck, not every U-boat
 SPORTS_MIN_SITELINKS = 60  # Olympics, World Cups and continental cups; not every league season
 EDITION_ROOTS = {"Q27020041", "Q27968055"}  # sports season, recurring event edition
@@ -195,25 +197,49 @@ def read(name):
 
 
 def load_old_names():
-    """Current name -> [(from, to, name of the time)] from basemap/old-names.json."""
+    """Current name -> [(from, to, name of the time, box or None)] from
+    basemap/old-names.json, and East Germany's outline from the 1960 borders."""
     with open(os.path.join(ROOT, "basemap", "old-names.json"), encoding="utf-8") as f:
         table = json.load(f)
     names = defaultdict(list)
     for e in table["countries"] + table["cities"]:
-        if e.get("data", True):
-            for n in e["names"]:
-                names[n].extend(e["eras"])
+        for n in e["names"]:
+            names[n].extend((a, b, old, e.get("where")) for a, b, old in e["eras"])
+    with open(os.path.join(ROOT, "basemap", "borders", "1960.geojson"), encoding="utf-8") as f:
+        gdr = next(f["geometry"] for f in json.load(f)["features"] if f["properties"]["label"] == "East Germany")
+    names[None] = gdr["coordinates"] if gdr["type"] == "MultiPolygon" else [gdr["coordinates"]]
     return names
 
 
-def name_of_time(label, year, names):
-    """"Saint Petersburg" in 1950 -> "Leningrad"; each part of "Russia, Ukraine"."""
+def inside(pt, polys):
+    """Is (lat, lng) inside any of these GeoJSON polygons (even-odd rule)?"""
+    y, x = pt
+    hit = False
+    for poly in polys:
+        for ring in poly:
+            for (x1, y1), (x2, y2) in zip(ring, ring[1:] + ring[:1]):
+                if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+                    hit = not hit
+    return hit
+
+
+def name_of_time(label, year, names, pt):
+    """"Saint Petersburg" in 1950 -> "Leningrad"; each part of "Russia, Ukraine".
+    pt (lat, lng) decides boxed renames and which Germany 1949-1990 means."""
     parts = []
     for part in label.split(", "):
-        for a, b, old in names.get(part, ()):
-            if (a is None or a <= year) and (b is None or year < b):
+        for a, b, old, box in names.get(part, ()):
+            if (a is None or a <= year) and (b is None or year < b) \
+                    and (box is None or box[0] <= pt[1] <= box[2] and box[1] <= pt[0] <= box[3]):
                 part = old
                 break
+        else:
+            if part == "Germany" and 1949 <= year < 1990:
+                # Divided Berlin stays Berlin; elsewhere, which side of the border.
+                if km(pt, (52.52, 13.405)) < 25:
+                    part = "Berlin"
+                else:
+                    part = "East Germany" if inside(pt, names[None]) else "West Germany"
         parts.append(part)
     return ", ".join(parts)
 
@@ -925,8 +951,9 @@ def main():
                 # Sitelinks here measure the thing (oxygen, a symphony), not
                 # the moment it was found or first heard: cap them.
                 r["sl"] = str(min(int(r["sl"] or 0), WORK_MAX_SITELINKS))
-            if kind == LAUNCHED and int(r["sl"] or 0) < LAUNCH_MIN_SITELINKS:
-                continue  # weather and communications satellites
+            if kind == LAUNCHED and int(r["sl"] or 0) < (ROUTINE_LAUNCH_MIN_SITELINKS if ROUTINE_CREWED.match(r["title"])
+                                                          else LAUNCH_MIN_SITELINKS):
+                continue  # minor satellites, routine crew flights
             if kind == SANK and int(r["sl"] or 0) < WRECK_MIN_SITELINKS:
                 continue
             s0, s1 = span(d)
@@ -947,6 +974,13 @@ def main():
     # A found object or premiered work is shown where it happened, not as a
     # "place" at the museum or theatre that holds it today.
     happenings = [h for h in happenings if not (h[0] in found and h[7] not in HAPPENED)]
+    # The same item twice: an event that is also a discovery keeps the event
+    # (the Tunguska event), a mission that is also a launch keeps the launch.
+    kinds_of = defaultdict(set)
+    for h in happenings:
+        kinds_of[h[0]].add(h[7])
+    happenings = [h for h in happenings if not (h[7] == DISCOVERED and EVENT in kinds_of[h[0]]
+                                                or h[7] == EVENT and LAUNCHED in kinds_of[h[0]])]
     # A ship whose sinking is already on the map as an event ("Sinking of RMS
     # Lusitania", the "Kursk submarine disaster"): the event only. (The Mary
     # Rose stays next to the Battle of the Solent.)
@@ -996,7 +1030,7 @@ def main():
     old_names = load_old_names()
     for r in happenings + worldwide_recs + standing:
         if r[12]:
-            renamed = name_of_time(r[12], r[4], old_names)
+            renamed = name_of_time(r[12], r[4], old_names, (r[2], r[3]))
             if renamed != r[12]:
                 r[12] = renamed
                 stats["renamed_places"] += 1
