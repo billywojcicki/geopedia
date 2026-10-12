@@ -215,6 +215,9 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 /* ---------- Article ---------- */
 
 .article-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 0; }
+.bar-actions { display: flex; align-items: center; gap: 6px; }
+.close-btn { width: 30px; height: 30px; background: var(--fill); color: var(--text-2); }
+.close-btn:hover { background: var(--fill-2); }
 .back {
   display: inline-flex; align-items: center; gap: 2px;
   padding: 6px 10px 6px 4px;

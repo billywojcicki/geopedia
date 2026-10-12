@@ -81,7 +81,7 @@ async function init() {
   map.touchZoomRotate.disableRotation();
   // Start with attribution folded into its (i) button.
   map.once('idle', () => document.querySelector('.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show'));
-  pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: r => select(r) });
+  pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: toggle });
   borders = new Borders(map);
   window.geopedia = { map, store, state, setYear, get candidates() { return candidates; } }; // for devtools
 
@@ -92,12 +92,12 @@ async function init() {
   new ResizeObserver(syncPadding).observe($('#timeline'));
   map.on('move', throttle(placePins, 120));
   map.on('moveend', onMoveEnd);
+  // Clicking empty map deselects; on phones it also puts the sheet away.
   map.on('click', e => {
     hideHover();
-    if (!sheet.active || map.queryRenderedFeatures(e.point, { layers: ['dots'] }).length) return;
-    // Phones: tapping the map puts the sheet away.
+    if (map.queryRenderedFeatures(e.point, { layers: ['dots'] }).length) return; // a dot: handled below
     if (state.selected) closeArticle();
-    else if (sheet.state !== 'peek') sheet.snap('peek');
+    else if (sheet.active && sheet.state !== 'peek') sheet.snap('peek');
   });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async e => {
     theme = e.matches ? 'dark' : 'light';
@@ -295,7 +295,7 @@ function bindDotEvents() {
   map.on('mouseleave', 'dots', () => { map.getCanvas().style.cursor = ''; hideHover(); });
   map.on('click', 'dots', e => {
     const r = candidates[e.features[0].id];
-    if (r) { e.preventDefault(); select(r); }
+    if (r) toggle(r);
   });
 }
 
@@ -459,6 +459,12 @@ function categoryLabel(r) {
 // Article view
 
 let articleSeq = 0;
+
+// Clicking the open item again closes it.
+function toggle(r) {
+  if (state.selected?.id === r.id) closeArticle();
+  else select(r);
+}
 
 function select(r, { fly = false, zoom = null } = {}) {
   hideHover();
@@ -739,6 +745,7 @@ function bindChrome() {
   $('#zoom-in').addEventListener('click', () => map.zoomIn());
   $('#zoom-out').addEventListener('click', () => map.zoomOut());
   $('#back').addEventListener('click', closeArticle);
+  $('#close').addEventListener('click', closeArticle);
   $('#share').addEventListener('click', share);
   const setCollapsed = c => {
     document.body.classList.toggle('collapsed', c);
