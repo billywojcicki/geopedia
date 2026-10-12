@@ -6,7 +6,7 @@ A map of history. Scroll around the world, drag the timeline, and see the Wikipe
 - **Zoomed in** on a city you get the local stuff: every battle, riot, treaty, building and birth that Wikipedia knows about there, plus the places that already existed at that point in time.
 - **The timeline** picks a year and a window around it (auto-sized by era, or pick your own). The map tints toward parchment and fades modern roads as you go back.
 - **Click anything** to read the Wikipedia summary in the side panel, or the full article inline.
-- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders overlay, shareable links (Share button on every article), play button, light/dark mode.
+- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders (on by default before 1900), shareable links (Share button on every article), play button, light/dark mode.
 - **On phones** the panel is a bottom sheet (peek, half, full) you drag by its top. Tapping a pin opens the article at half height with the pin centred in the map above it; tapping the map or swiping down puts it away.
 
 ## Run it
@@ -26,7 +26,7 @@ To host it, turn on GitHub Pages for the branch (Settings > Pages > Deploy from 
 index.html, css/, js/     the site (vanilla JS modules)
 sw.js                     service worker (caching, see Performance)
 data/                     generated history data the site loads (committed)
-basemap/                  self-hosted world basemap, map style, label fonts (generated)
+basemap/                  self-hosted world basemap, map style, label fonts, historical borders (generated)
 vendor/                   MapLibre GL, served from this site (fetched by the build)
 scripts/                  data pipeline (Python 3, stdlib only)
 ```
@@ -49,6 +49,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 python3 scripts/fetch_wikidata.py   # ~2 min, caches CSVs in build/raw/
 python3 scripts/build_data.py       # ~40 s, writes data/
 python3 scripts/build_basemap.py    # writes basemap/ and vendor/ (rarely needs rerunning)
+python3 scripts/build_borders.py    # writes basemap/borders/ (rarely needs rerunning)
 node scripts/social_card.mjs URL    # optional: re-shoot og.jpg and icons/ (needs Playwright)
 ```
 
@@ -81,6 +82,10 @@ Still a plain static site. The speed comes from never downloading or drawing wha
 So the world view downloads only the world's top items for the window, and a city view downloads only that city (every era of it, so scrubbing the timeline there needs no network at all). The search index records which file holds each item, so opening a search result is one small fetch.
 
 **Our own world basemap.** OpenFreeMap's world-level tiles are 300-700 KB each, so the default view used to pull ~5.5 MB of tiles (plus 1.2 MB of shaded-relief images) and showed a patchy map while they arrived. Below zoom 6 the map now draws only `basemap/world.json`: Natural Earth 1:50m land, lakes, borders and labels, simplified to what those zooms can show and delta-encoded, 170 KB gzipped. OpenFreeMap tiles load only from zoom 6, where they're smaller; our coarse land stays underneath until zoom 7.5 so the sea never flashes land-coloured while they arrive. The relief layer is gone (it was also why zooming in looked blurry).
+
+**Historical borders, self-hosted.** The originals are 2-4 MB per era (600 KB gzipped from a CDN) and parsing one froze the page for most of a second. `scripts/build_borders.py` simplifies each era to about a pixel at zoom 5, 120 KB gzipped, and adds one label point per polity; the map's worker fetches and parses them, so changing era costs the page nothing. They load only once the map is idle, so they never slow the first view.
+
+**Old maps vs. today's.** The basemap is always today's (OpenStreetMap streets and buildings, modern country borders and names); nobody has historical street data at world scale. Going back in time it shifts to a parchment tint and fades roads, railways and buildings (mostly gone by 1750). Before 1900 the historical borders overlay is on by default and hides modern borders and country names; the Layers toggle overrides that.
 
 **One origin for the first view.** MapLibre, the map style, the world basemap and the Latin glyphs of the label font are all served from this site, so the first view needs no third-party server at all (other glyph ranges still come from OpenFreeMap when needed).
 
@@ -174,5 +179,5 @@ Decided: People is off by default; founding pins stay but are backdrop (capped s
 
 - Data: [Wikidata](https://www.wikidata.org) (CC0) and [Wikipedia](https://en.wikipedia.org) (CC BY-SA 4.0), images from Wikimedia Commons (various licenses)
 - Basemap: [Natural Earth](https://www.naturalearthdata.com) (public domain) when zoomed out; [OpenFreeMap](https://openfreemap.org), [OpenMapTiles](https://openmaptiles.org), [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors when zoomed in. Label font: Noto Sans (SIL Open Font License)
-- Historical borders: [aourednik/historical-basemaps](https://github.com/aourednik/historical-basemaps) (GPL-3.0), loaded on demand
+- Historical borders: [aourednik/historical-basemaps](https://github.com/aourednik/historical-basemaps) (GPL-3.0), simplified and self-hosted in `basemap/borders/` (see `SOURCE.md` there)
 - Map rendering: [MapLibre GL JS](https://maplibre.org) (BSD-3-Clause), vendored in `vendor/`

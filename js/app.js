@@ -21,7 +21,7 @@ const state = {
   cats: new Set(CATEGORIES.flatMap((c, i) => (c.off ? [] : [i]))),
   standing: true,
   globe: true,
-  borders: false,
+  borders: null, // null: automatic (on before AUTO_BORDERS_BEFORE); true/false: the user's choice
   selected: null,
 };
 let map, pins, timeline, borders, sheet;
@@ -111,6 +111,8 @@ async function init() {
   map.once('idle', () => {
     store.prefetchWorld();
     registerServiceWorker();
+    bordersReady = true;
+    syncBorders();
   });
 }
 
@@ -147,6 +149,19 @@ function registerServiceWorker() {
 let lastAge = -1;
 let styleReady = false;
 
+// Historical borders are on by default before 1900, when today's borders
+// mislead; the Layers toggle overrides that for the session. They wait for the
+// map's first idle so they never slow down the first view.
+const AUTO_BORDERS_BEFORE = 1900;
+let bordersReady = false;
+function syncBorders(dragging = false) {
+  const on = state.borders ?? state.year < AUTO_BORDERS_BEFORE;
+  $('#opt-borders').checked = on;
+  if (!bordersReady) return;
+  if (on !== borders.on) borders.toggle(on, state.year);
+  else if (on) borders.setYear(state.year, dragging);
+}
+
 function setYear(y, { dragging = false } = {}) {
   state.year = clamp(Math.round(y), MIN_YEAR, MAX_YEAR);
   const [a, b] = range();
@@ -157,7 +172,7 @@ function setYear(y, { dragging = false } = {}) {
 
   const age = Math.round(ageFor(state.year) * 50) / 50;
   if (age !== lastAge && styleReady) { lastAge = age; applyAge(map, theme, age); }
-  if (state.borders) borders.setYear(state.year, dragging);
+  syncBorders(dragging);
   // Prefetch only once the map is up, so it never competes with the first view.
   if (!dragging && map) store.prefetchAround(currentView());
   scheduleUpdate();
@@ -796,7 +811,7 @@ function bindChrome() {
   });
   $('#opt-borders').addEventListener('change', e => {
     state.borders = e.target.checked;
-    borders.toggle(state.borders, state.year);
+    syncBorders();
   });
 
   const sel = $('#span');
