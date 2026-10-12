@@ -34,7 +34,7 @@ await ctx.close();
 
 // Icons from icons/icon.svg.
 const icon = await browser.newPage();
-for (const [size, name] of [[180, 'apple-touch-icon.png'], [192, 'icon-192.png'], [512, 'icon-512.png']]) {
+for (const [size, name] of [[32, 'favicon-32.png'], [48, 'favicon-48.png'], [180, 'apple-touch-icon.png'], [192, 'icon-192.png'], [512, 'icon-512.png']]) {
   await icon.setViewportSize({ width: size, height: size });
   await icon.goto(`${site}icons/icon.svg`);
   await icon.screenshot({ path: path.join(root, 'icons', name) });

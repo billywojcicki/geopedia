@@ -63,7 +63,9 @@ Built for the X / Twitter in-app browser as much as for Safari and Chrome:
 - Uses dynamic viewport units and safe-area insets, so nothing sits under a notch, home bar or in-app toolbar. The search box is 16px so iOS doesn't zoom in on focus; pinching over the panels doesn't zoom the page.
 - Touch targets: dot pins have a bigger invisible hit area and labels are tappable; no zoom buttons (pinch) and no hover cards on touch.
 - The map renders at most at 2x pixel density (phones report 3x; it looks the same and draws much faster), and the background world prefetch is skipped on touch devices to save data.
-- Link previews: Open Graph and Twitter card tags with `og.jpg` (a real screenshot) and app icons. The tags point at `https://billywojcicki.github.io/geopedia/`; change them in `index.html` if the site moves to another domain.
+- Link previews (iMessage, X, WhatsApp, Slack, Discord): Open Graph and Twitter card tags with `og.jpg`, a real screenshot at 2400x1260 (the wide ratio gets the large card). iMessage takes its small icon from the 180px `apple-touch-icon`. Previews are cached by image URL, so **bump `og.jpg?v=` in `index.html` whenever the image changes**. Regenerate the image and icons with `node scripts/social_card.mjs <site url>`.
+- Also in place: PNG favicons next to the SVG one (Safari before 17, search results), a web app manifest with a maskable icon (Android home screens), a canonical URL, structured data for search engines, a `404.html` that sends stray links back to the map, a message for browsers without JavaScript, and no phone-number auto-linking of years on iOS.
+- Everything points at `https://billywojcicki.github.io/geopedia/`; change `index.html` and `404.html` if the site moves to another domain.
 
 ## Performance
 

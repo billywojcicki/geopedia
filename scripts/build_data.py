@@ -138,6 +138,7 @@ HUGE_AREA = 2e11  # m² (200,000 km²): too big even to stand in for an event's 
 WORLDWIDE_MIN_SITELINKS = 25  # events spread over several regions must be this notable
 WORLD_KM = 5000  # places further apart than this: a worldwide event, not pinned
 NATIONWIDE_MIN_SITELINKS = 10  # events known only by country must be this notable
+ELECTION_MIN_SITELINKS = 40  # national elections too (they'd crowd every capital)
 WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
 SPORTS_MIN_SITELINKS = 40
 MIN_FOUNDING_HAPPENING = 1.5  # roughly 3+ sitelinks for a building, 5+ for a town
@@ -145,6 +146,7 @@ MIN_ESTABLISHED_HAPPENING = 3.0  # institutions, firms etc. need ~7+ sitelinks
 # Standing places need this many sitelinks (one fewer with a photo).
 MIN_STANDING_SITELINKS = {"low": 6, "institution": 2, None: 2}
 IMAGE_BONUS = 1.15
+DROPPED_MIN_SITELINKS = 20  # build/dropped.csv lists left-out items this notable
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -380,17 +382,20 @@ def main():
     class_cache = {}
 
     def class_role(c):
-        """Nearest (distance, priority, role) keep-match above class c, and the
-        distance to the nearest exclude root (or None)."""
+        """Nearest (distance, priority, role) keep-match above class c, the
+        distance to the nearest exclude root (or None), and to the nearest weak
+        exclude root (or None)."""
         if c in class_cache:
             return class_cache[c]
         seen, frontier, dist = {c}, [c], 0
-        keep, excl = None, None
+        keep, excl, weak = None, None, None
         while frontier and dist <= 12 and (keep is None or excl is None):
             hits = [role_of_root[x] for x in frontier if x in role_of_root]
             if excl is None and "exclude" in hits:
                 excl = dist
-            hits = [h for h in hits if h != "exclude"]
+            if weak is None and "exclude-weak" in hits:
+                weak = dist
+            hits = [h for h in hits if h not in ("exclude", "exclude-weak")]
             if keep is None and hits:
                 role = min(hits, key=rank.get)
                 keep = (dist, rank[role], role)
@@ -401,8 +406,8 @@ def main():
                         seen.add(p)
                         nxt.append(p)
             frontier, dist = nxt, dist + 1
-        class_cache[c] = (keep, excl)
-        return keep, excl
+        class_cache[c] = (keep, excl, weak)
+        return keep, excl, weak
 
     print("loading items…")
     items = {}
@@ -418,15 +423,17 @@ def main():
             it["img"] = commons_path(r["image"])
             it["desc"] = clean_desc(r["desc"])
 
-    best_keep, best_excl = {}, {}
+    best_keep, best_excl, weak_excl = {}, {}, set()
     for r in read("classes"):
         i = qid(r["item"])
         if i in items:
-            keep, excl = class_role(r["cls"].rsplit("/", 1)[1])
+            keep, excl, weak = class_role(r["cls"].rsplit("/", 1)[1])
             if keep and (i not in best_keep or keep < best_keep[i]):
                 best_keep[i] = keep
             if excl is not None and excl < best_excl.get(i, 99):
                 best_excl[i] = excl
+            if weak is not None:
+                weak_excl.add(i)
 
     # National elections are known only by country and would crowd the
     # capitals of the recent past: they don't get the country fallback.
@@ -458,6 +465,8 @@ def main():
         award ceremony is also, one step up, a ceremony)."""
         keep, excl = best_keep.get(i), best_excl.get(i)
         if i in vehicles:
+            return "exclude"
+        if keep is None and i in weak_excl:
             return "exclude"
         if excl is not None and (keep is None or excl < keep[0] - 1 or (excl == 0 and keep[0] > 0)):
             return "exclude"
@@ -582,7 +591,7 @@ def main():
         return "Worldwide" if spread(pts) > WORLD_KM else ""
 
     dates = defaultdict(lambda: defaultdict(list))  # item -> property -> [(rank, date)]
-    for prop in ["P585", "P580", "P582", "P571", "P576", "P1619"]:
+    for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249"]:
         for r in read(f"date_{prop}"):
             i = qid(r["item"])
             rk = rank_of(r["rk"])
@@ -590,6 +599,13 @@ def main():
                 d = parse_time(r["t"], r["prec"], r["cal"])
                 if d:
                     dates[i][prop].append((rk, d))
+
+    # Notable items left out, and why: build/dropped.csv answers "why isn't X on the map?".
+    dropped = []
+
+    def drop(i, it, role, reason):
+        if it["sl"] >= DROPPED_MIN_SITELINKS:
+            dropped.append((it["sl"], f"Q{i}", it["title"], role or "", reason))
 
     print("classifying…")
     happenings = []
@@ -601,6 +617,7 @@ def main():
         role = item_role(i)
         if role == "exclude":
             stats["excluded"] += 1
+            drop(i, it, role, "excluded")
             continue
         ds = dates.get(i, {})
         cat = role if role in EVENT_ROLES else None
@@ -619,7 +636,8 @@ def main():
             pit_d, pits = None, []
         start_d = p580 or pit_d
         end_d = p582 or pit_d
-        found_d = best(ds.get("P571")) or best(ds.get("P1619"))
+        # Founding, opening, or failing those the earliest written record (Moscow, 1147).
+        found_d = best(ds.get("P571")) or best(ds.get("P1619")) or best(ds.get("P1249"))
         is_place = role in PLACE_ROLES or (cat is None and found_d is not None)
         sl = it["sl"]
         img = it.get("img", "")
@@ -632,6 +650,7 @@ def main():
                     stats[f"guessed:{cat}"] += 1
             if start_d is None:
                 stats["no_date"] += 1
+                drop(i, it, role, "no date")
                 continue
             # Several dates a few days apart (Hiroshima, then Nagasaki): a range.
             # Further apart they are more likely rival datings: keep the best one.
@@ -644,7 +663,7 @@ def main():
             if how == "country":
                 # Known only by country: the capital, for events notable enough
                 # (elections would crowd every capital).
-                if notable and sl >= NATIONWIDE_MIN_SITELINKS and not elections.get(i):
+                if notable and sl >= NATIONWIDE_MIN_SITELINKS and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS):
                     stats["event:nationwide"] += 1
                 else:
                     pt, place = None, ""
@@ -657,14 +676,17 @@ def main():
                     place = ""  # a minor one keeps a specific place, if it has one
             if not pt:
                 stats["event_nocoord"] += 1
+                drop(i, it, role, "event: no usable place")
                 continue
             if cat == "sports" and sl < SPORTS_MIN_SITELINKS:
                 stats["sports_dropped"] += 1
+                drop(i, it, role, "sports/edition under the bar")
                 continue
             spans = [span(d) for d in (start_d, end_d) if d]
             start, end = min(x[0] for x in spans), max(x[1] for x in spans)
             if end - start > 2000 or start > MAX_YEAR:
                 stats["bad_span"] += 1
+                drop(i, it, role, "bad span")
                 continue
             # A stated span reads as one ("1789–1799", "6 Apr – 29 May 1453");
             # otherwise the most precise single date.
@@ -687,10 +709,12 @@ def main():
         found_d = found_d or start_d or pit_d
         if found_d is None:
             stats["no_date"] += 1
+            drop(i, it, role, "no date")
             continue
         pt = coords.get(i)
         if not pt:
             stats["place_nocoord"] += 1
+            drop(i, it, role, "place: no coordinates")
             continue
         s0, s1 = span(found_d)
         if s0 > MAX_YEAR:
@@ -749,6 +773,11 @@ def main():
     # "place" at the museum or theatre that holds it today.
     happenings = [h for h in happenings if not (h[0] in found and h[7] not in HAPPENED)]
     standing = [p for p in standing if p[0] not in found]
+
+    with open(os.path.join(ROOT, "build", "dropped.csv"), "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["sitelinks", "item", "title", "role", "reason"])
+        w.writerows(sorted(dropped, reverse=True))
 
     for k, v in sorted(stats.items()):
         print(f"  {k}: {v}")

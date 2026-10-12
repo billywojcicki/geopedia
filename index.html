@@ -5,27 +5,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Geopedia: the free atlas of history</title>
   <meta name="description" content="A map of history. Scroll the world, drag through time, and read the Wikipedia article for what happened there and then.">
+  <link rel="canonical" href="https://billywojcicki.github.io/geopedia/">
 
-  <!-- Link previews (X, iMessage, Slack...). Image URLs must be absolute. -->
+  <!-- Link previews (iMessage, X, WhatsApp, Slack, Discord...). Image URLs must
+       be absolute. Bump ?v= when og.jpg changes: previews are cached by URL. -->
   <meta property="og:type" content="website">
+  <meta property="og:locale" content="en_US">
   <meta property="og:site_name" content="Geopedia">
   <meta property="og:title" content="Geopedia: the free atlas of history">
   <meta property="og:description" content="Scroll the world, drag through time, and read the Wikipedia article for what happened there and then.">
   <meta property="og:url" content="https://billywojcicki.github.io/geopedia/">
-  <meta property="og:image" content="https://billywojcicki.github.io/geopedia/og.jpg">
+  <meta property="og:image" content="https://billywojcicki.github.io/geopedia/og.jpg?v=2">
+  <meta property="og:image:secure_url" content="https://billywojcicki.github.io/geopedia/og.jpg?v=2">
+  <meta property="og:image:type" content="image/jpeg">
   <meta property="og:image:width" content="2400">
   <meta property="og:image:height" content="1260">
   <meta property="og:image:alt" content="Geopedia showing Europe in 1815 with period borders, the Battle of Waterloo open beside the map">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Geopedia: the free atlas of history">
   <meta name="twitter:description" content="Scroll the world, drag through time, and read the Wikipedia article for what happened there and then.">
-  <meta name="twitter:image" content="https://billywojcicki.github.io/geopedia/og.jpg">
+  <meta name="twitter:image" content="https://billywojcicki.github.io/geopedia/og.jpg?v=2">
   <meta name="twitter:image:alt" content="Geopedia showing Europe in 1815 with period borders, the Battle of Waterloo open beside the map">
-  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <!-- iMessage and iOS home screens use the touch icon; Safari before 17 and
+       search results want PNG favicons. -->
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-title" content="Geopedia">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <script type="application/ld+json">
+    {"@context": "https://schema.org", "@type": "WebSite", "name": "Geopedia", "alternateName": "Geopedia: the free atlas of history",
+     "url": "https://billywojcicki.github.io/geopedia/", "image": "https://billywojcicki.github.io/geopedia/og.jpg?v=2",
+     "description": "A map of history. Scroll the world, drag through time, and read the Wikipedia article for what happened there and then.",
+     "inLanguage": "en"}
+  </script>
   <link rel="manifest" href="manifest.webmanifest">
 
   <!-- Speed: start the critical fetches before anything else loads. -->
@@ -58,6 +75,7 @@
   <link rel="stylesheet" href="vendor/maplibre-gl@5.24.0/maplibre-gl.css" media="print" onload="this.media='all'">
 </head>
 <body>
+  <noscript><p class="noscript">Geopedia is an interactive map and needs JavaScript. You can still browse history on <a href="https://en.wikipedia.org/">Wikipedia</a>.</p></noscript>
   <div id="map" aria-label="Map"></div>
 
   <!-- Sidebar: brand, search, filters, list / article -->

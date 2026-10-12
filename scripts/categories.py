@@ -51,6 +51,7 @@ ROOTS = {
         "Q40231",  # public election
         "Q132821",  # murder
         "Q2334719",  # legal case (Wikidata files it under "conflict")
+        "Q59532",  # christianization (of a people or state)
         "Q8016240",  # trial
         "Q16738832",  # criminal case
         "Q2761147",  # meeting
@@ -121,7 +122,6 @@ ROOTS = {
     # Never shown: noise for a history map, or coordinates that mean nothing.
     "exclude": [
         "Q4504495",  # award ceremony
-        "Q1060829",  # broadcaster
         "Q1573906",  # concert tour
         "Q3887",  # solar eclipse
         "Q3464665",  # television series season
@@ -133,7 +133,6 @@ ROOTS = {
         "Q6256",  # country (modern countries sit at meaningless centroids)
         "Q3624078",  # sovereign state
         "Q18524218",  # canton of France
-        "Q45400320",  # open-access publisher
         "Q13406463",  # Wikimedia list article
         "Q4167836",  # Wikimedia category
         "Q5398426",  # television series
@@ -144,7 +143,6 @@ ROOTS = {
         "Q34770",  # language
         "Q618779",  # award
         "Q41710",  # ethnic group
-        "Q9174",  # religion
         "Q3305213",  # painting (sits wherever the museum is)
         "Q93184",  # drawing
         "Q11060274",  # print
@@ -204,4 +202,13 @@ ROOTS["institution"] = [
 # meeting too).
 EVENT_ROLES = ["conflict", "disaster", "science", "culture", "politics", "sports"]
 PLACE_ROLES = ["settlement", "structure", "institution", "low"]
-ROLE_PRIORITY = EVENT_ROLES + PLACE_ROLES + ["exclude"]
+ROLE_PRIORITY = EVENT_ROLES + PLACE_ROLES + ["exclude", "exclude-weak"]
+
+# Weak exclusions: only when nothing else claims the item (Stanford is a
+# university and an open-access publisher; the Royal Albert Hall a concert hall
+# and a broadcaster).
+ROOTS["exclude-weak"] = [
+    "Q45400320",  # open-access publisher
+    "Q1060829",  # broadcaster
+    "Q9174",  # religion
+]

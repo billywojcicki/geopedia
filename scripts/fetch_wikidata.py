@@ -161,7 +161,7 @@ SELECT DISTINCT ?a ?b WHERE {{
   ?a wdt:P279 ?b .
 }}"""
 
-for prop in ["P585", "P580", "P582", "P571", "P576", "P1619"]:
+for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249"]:
     QUERIES[f"date_{prop}"] = f"""
 SELECT ?item (?tv AS ?t) (?pr AS ?prec) ?cal ?rk WHERE {{
   {ENWIKI}
