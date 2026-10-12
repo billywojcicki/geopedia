@@ -8,7 +8,7 @@ matters: Wikidata's class tree is messy (protests are, eventually, a
 """
 
 # Display categories (index = category id used in the data files).
-CATEGORIES = ["conflict", "politics", "disaster", "culture", "science", "built", "people"]
+CATEGORIES = ["conflict", "politics", "disaster", "culture", "science", "exploration", "built", "people"]
 
 ROOTS = {
     "conflict": [
@@ -38,14 +38,15 @@ ROOTS = {
         "Q891854",  # bomb attack
         "Q41397",  # genocide
         "Q623179",  # state terrorism
-    "Q217327",  # suicide attack (otherwise a "suicide": a disaster)
-    "Q676324",  # armada (the Spanish Armada; otherwise an organization)
+        "Q217327",  # suicide attack (otherwise a "suicide": a disaster)
+        "Q676324",  # armada (the Spanish Armada; otherwise an organization)
+        "Q56514238", "Q61039291",  # mass killing, knife attack (otherwise a disaster or politics)
     ],
     "politics": [
         "Q131569",  # treaty
         "Q273120",  # protest
-    "Q175331",  # demonstration (otherwise an "organization")
-    "Q88178910",  # assassination attempt (otherwise a violent crime)
+        "Q175331",  # demonstration (otherwise an "organization")
+        "Q88178910",  # assassination attempt (otherwise a violent crime)
         "Q124757",  # riot
         "Q10931",  # revolution
         "Q3882219",  # assassination
@@ -69,8 +70,11 @@ ROOTS = {
         "Q1123131",  # disputation
         "Q179875",  # debate
         "Q8016240",  # trial
-    "Q2282872", "Q669970",  # diet, Imperial Diet (the Diet of Worms; otherwise an organization)
-    "Q93288",  # contract (the Treaty of Waitangi)
+        "Q2282872", "Q669970",  # diet, Imperial Diet (the Diet of Worms; otherwise an organization)
+        "Q93288",  # contract (the Treaty of Waitangi)
+        "Q10737",  # suicide (the Death of Adolf Hitler; otherwise a "tragedy", a disaster)
+        "Q179366",  # boycott (the Montgomery bus boycott)
+        "Q40728071", "Q421",  # UFO sighting, UFO (otherwise an aviation accident)
         "Q16738832",  # criminal case
         "Q2761147",  # meeting
         "Q209715",  # coronation
@@ -90,6 +94,12 @@ ROOTS = {
         "Q290178",  # economic crisis
         "Q176494",  # recession
         "Q207781",  # economic bubble
+        # Economy shares the filter (Politics & economy)
+        "Q114380", "Q806663", "Q806729",  # financial crisis, bank run, banking crisis
+        "Q185565", "Q773335", "Q1417912", "Q1092023",  # hyperinflation, debt crisis, currency crisis, sovereign default
+        "Q273182", "Q3454786",  # gold rush, economic reform
+        "Q252550", "Q3536928", "Q692412", "Q989265",  # trade agreement, free trade agreement, trade war, embargo
+        "Q24706",  # Japanese era name (only the famous ones: see ROOT_MIN_SITELINKS)
     ],
     "disaster": [
         "Q3839081",  # disaster
@@ -112,6 +122,7 @@ ROOTS = {
         "Q3002150",  # aircraft crash
         "Q81054",  # storm
         "Q828827",  # power outage
+        "Q642683", "Q1162172", "Q1277161",  # weather events: the Year Without a Summer, the volcanic winter of 536
     ],
     "culture": [
         "Q188976",  # counterculture
@@ -122,16 +133,25 @@ ROOTS = {
         "Q465299",  # archaeological culture
         "Q968159",  # art movement
         "Q238526",  # golden age
-    "Q8432",  # civilization (the Zapotecs; otherwise just a "group of humans")
+        "Q8432",  # civilization (the Zapotecs; otherwise just a "group of humans")
     ],
     "science": [
-        "Q2401485",  # expedition
         "Q101965",  # experiment
         "Q12772819",  # discovery
-        "Q2133344",  # space mission
-        "Q5916",  # spaceflight
-        "Q797476",  # rocket launch
         "Q210112",  # nuclear weapons testing
+        "Q60186",  # meteorite (its fall: Ensisheim, Allende)
+    ],
+    "exploration": [
+        "Q2401485",  # expedition
+        "Q6502154", "Q116967296",  # exploration
+        "Q1135885",  # circumnavigation
+        "Q69502940",  # polar expedition
+        "Q96741677", "Q1194369",  # mountaineering expedition, first ascent
+        "Q2133344",  # space mission
+        "Q5916", "Q752783",  # spaceflight, human spaceflight
+        "Q26529",  # space probe
+        "Q797476",  # rocket launch
+        "Q60054001", "Q13226541", "Q21605492", "Q849730", "Q9063118",  # space programmes (Apollo, Gemini, Mercury, Mariner, Salyut)
     ],
     # Sports are culture, but only kept when very notable (Olympics, World Cups).
     # Other yearly editions (pageants, festivals, contests) get the same bar.
@@ -147,7 +167,6 @@ ROOTS = {
         "Q4504495",  # award ceremony
         "Q1573906",  # concert tour
         "Q3887",  # solar eclipse
-        "Q24706",  # Japanese era name (calendar periods, not events)
         "Q16022392",  # edit-a-thon
         "Q79786",  # Wikimedia meetup
         "Q26132862",  # Olympic sports discipline event (the Games themselves stay)
@@ -163,8 +182,20 @@ ROOTS = {
         "Q3464665",  # television series season
         "Q21191270",  # television series episode
         "Q220397",  # saros (eclipse series)
-    "Q482994",  # album
-    "Q1384330", "Q176799",  # expeditionary force, military unit (the Afrika Korps is not an expedition)
+        "Q482994",  # album
+        "Q1384330", "Q176799",  # expeditionary force, military unit (the Afrika Korps is not an expedition)
+        # Routine summits: one a year, none remembered for itself
+        "Q28966115", "Q20739115", "Q26805735", "Q18575573", "Q28415750",  # G7, G8, G20, BRICS, APEC summits
+        "Q643292", "Q20389574", "Q30178840", "Q28966106", "Q2139567", "Q17276616",  # NATO, Arab League, SCO, G6, Imperial Conference, IOC Session
+        # Recurring fairs and festivals, dated by their founding
+        "Q57305", "Q124326999", "Q220505", "Q673514",  # trade fair, recurring product launch, film festival, Renaissance fair
+        "Q150139", "Q1435951", "Q444456", "Q7852059", "Q2699757",  # patronal, food, balloon, tulip, fireworks festivals
+        "Q109379965", "Q6147123",  # Holy Week in a region, romeria
+        "Q109471870", "Q109473326", "Q117389020",  # "X in World War II/I", "Y in the American Civil War" sub-articles
+        "Q20642011", "Q17127659",  # guerrilla and terrorist organizations (FARC, Boko Haram are not events)
+        "Q59759", "Q1050739",  # professional wrestling events
+        "Q15707521",  # fictional battle
+        "Q53945096", "Q2122052",  # group stage, qualification (parts of a tournament)
         "Q14350",  # radio station
         "Q1616075",  # television station
         "Q27971968",  # constituency of the House of Commons
@@ -217,7 +248,7 @@ ROOTS = {
 
 # Place roles: all shown as "built" on the map, but they pick the verb
 # ("Built" / "Founded" / "Established") and keep items from being excluded.
-ROOTS["structure"] = ["Q811979", "Q41176", "Q839954"]  # built structure, building, archaeological site
+ROOTS["structure"] = ["Q811979", "Q41176", "Q839954", "Q161851"]  # built structure, building, archaeological site, condominium
 ROOTS["settlement"] = [
     "Q486972",  # human settlement
     "Q515",  # city (listed directly: it is also, more distantly, an admin unit)
@@ -239,7 +270,7 @@ ROOTS["institution"] = [
 # Politics comes after culture and science: its roots (meeting, ceremony) are
 # broad, so on a tie the more specific reading wins (a film festival is a
 # meeting too).
-EVENT_ROLES = ["conflict", "disaster", "science", "culture", "politics", "sports"]
+EVENT_ROLES = ["conflict", "disaster", "exploration", "science", "culture", "politics", "sports"]
 PLACE_ROLES = ["settlement", "structure", "institution", "low"]
 ROLE_PRIORITY = EVENT_ROLES + PLACE_ROLES + ["exclude", "exclude-weak"]
 
@@ -267,9 +298,28 @@ NOT_EVENTS = [
     "Q16334295", "Q17197366",  # group of humans, type of organization
     "Q174984", "Q2095", "Q7239",  # signal, food, organism (not "product": speeches reach it)
     "Q645466", "Q110055303", "Q59152282", "Q477544",  # national emblem, rocket model, streaming service, new religious movement
+    "Q39825", "Q113813711", "Q29048322", "Q223371",  # census, coin type, vehicle model, stock market index
+    "Q12132", "Q4375074", "Q5372133",  # calendar system, calendar era, Japanese year
+    "Q1311670", "Q728937", "Q15141321", "Q5503", "Q15141395",  # rail infrastructure, railway line, train service, rapid transit, people mover
+    "Q15416", "Q2001305", "Q1358344", "Q373899", "Q35127", "Q30849",  # TV program, TV channel, news program, record chart, website, blog
+    "Q15622363", "Q12045584",  # sheep and rabbit breeds
+    "Q179700", "Q860861", "Q101401", "Q170984", "Q191851", "Q1926935", "Q170063",  # statue, sculpture, bell, crown, vase, stamp edition, wedding dress
+    "Q12765852", "Q22811234",  # philosophical school, branch of philosophy
+    "Q109551565", "Q25679497", "Q1792379", "Q107357104", "Q7777573", "Q12684",  # literature, art of an area, art genre, dance, theatre genre, fashion
+    "Q25631158", "Q55504191", "Q111722634", "Q109542585", "Q44235",  # highway systems, rocket series and families, lunar eclipse
+    "Q689863", "Q188589", "Q25956", "Q3348407", "Q349772",  # synchrotron, tokamak, space station, observatories
+    "Q29791211", "Q15284636",  # sport in a region, presidential term
+    "Q1145276", "Q21190845", "Q987057", "Q113115838", "Q107538843", "Q14623646",  # fictional country, duo, mascot, multiverse, research facility, organisation
 ]
 
-# Famous moments the denylist above would catch (the Wow! signal is a signal,
-# RDS-1 and the Tsar Bomba bombs, the Radium Girls a group of people), with
-# their category.
-KEEP_EVENTS = {"Q33297": "science", "Q586755": "science", "Q188596": "science", "Q1128589": "politics"}
+# Single items that are left out: duplicates of an event already on the map
+# (the Japanese Instrument of Surrender, COVID-19 the disease), phrases (Alea
+# iacta est, Vae victis), and things no class rule catches (Tequila, a caldera).
+DROP_ITEMS = {"Q665554", "Q84263196", "Q271723", "Q922557", "Q122195", "Q2071883"}
+
+# Famous moments the rules would leave out (the Wow! signal is a signal,
+# RDS-1 and the Tsar Bomba bombs, the Radium Girls a group of people, the
+# first Tour de France a yearly edition), with their category. They skip the
+# notability bars like the vital articles do.
+KEEP_EVENTS = {"Q33297": "science", "Q586755": "science", "Q188596": "science", "Q1128589": "politics",
+               "Q506911": "culture"}  # the first Tour de France (yearly editions otherwise need 60 editions)

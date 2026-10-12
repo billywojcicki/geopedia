@@ -57,11 +57,12 @@ CANDIDATE = """
     { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P571 [] } UNION { ?item wdt:P1619 [] }
     { ?item wdt:P625 [] } UNION { ?item wdt:P276 ?_l . ?_l wdt:P625 [] } UNION { ?item wdt:P1427 ?_s . ?_s wdt:P625 [] }
   } UNION {
-    { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] }
+    { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P577 [] }
     { ?item wdt:P131 ?_m . ?_m wdt:P625 [] } UNION { ?item wdt:P17 [] }
   }
 """
-EVENT_DATE = "{ ?item wdt:P585 [] } UNION { ?item wdt:P580 [] }"
+# (P577, publication date: laws and court cases known by it, Roe v. Wade.)
+EVENT_DATE = "{ ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P577 [] }"
 
 # Location classes too vague to pin an event on: countries, states, continents,
 # oceans, seas, regions, peninsulas, rivers, mountain ranges... (big areas are
@@ -121,14 +122,20 @@ SELECT DISTINCT ?item ?c WHERE {{
     # port, a march's first town). ?cap/?big flag locations that are countries,
     # states, oceans etc. (their coordinate is a meaningless centroid).
     "loccoords": f"""
-SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area ?start WHERE {{
+SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area ?start ?lsl ?arch WHERE {{
   {ENWIKI}
-  {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }} UNION {{ ?item wdt:P571 [] }}
+  {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }} UNION {{ ?item wdt:P571 [] }} UNION {{ ?item wdt:P577 [] }}
   {{ ?item wdt:P276 ?loc }} UNION {{
     ?item wdt:P1427 ?loc . BIND(1 AS ?start)
     FILTER NOT EXISTS {{ ?item wdt:P276 ?_l . ?_l wdt:P625 [] }}
   }}
   ?loc wdt:P625 ?c .
+  # Archives and libraries: where a document is kept, not where it was
+  # signed (the Treaty of Tordesillas is not an event in Lisbon's Torre do
+  # Tombo); the build ignores them for documents only (the Dumbarton Oaks
+  # Conference did meet at Dumbarton Oaks).
+  OPTIONAL {{ ?loc wdt:P31/wdt:P279* ?_a VALUES ?_a {{ wd:Q166118 wd:Q7075 }} BIND(1 AS ?arch) }}
+  OPTIONAL {{ ?loc wikibase:sitelinks ?lsl }}  # the build prefers the best-known of several places
   FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
   OPTIONAL {{ ?loc wdt:P36 ?cap OPTIONAL {{ ?cap wdt:P625 ?capc }} }}
   OPTIONAL {{ ?loc wdt:P31 ?big VALUES ?big {{ {BIG_CLASSES} }} }}
@@ -185,6 +192,16 @@ SELECT DISTINCT ?item ?cls WHERE {{
 }}""",
 }
 
+# Items with no "instance of" (Counties of Sweden, a banknote): what they are
+# a subclass of, for the build to judge them by.
+QUERIES["noclass"] = f"""
+SELECT DISTINCT ?item ?cls WHERE {{
+  {ENWIKI}
+  {CANDIDATE}
+  FILTER NOT EXISTS {{ ?item wdt:P31 [] }}
+  ?item wdt:P279 ?cls .
+}}"""
+
 # Subclass (P279) edges above every class our items use, so the build can
 # find each class's *nearest* category root instead of any ancestor.
 QUERIES["subclass"] = f"""
@@ -194,7 +211,40 @@ SELECT DISTINCT ?a ?b WHERE {{
   ?a wdt:P279 ?b .
 }}"""
 
-for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249"]:
+# A class with no superclass of its own is followed through what it is an
+# instance of (an edition's class is often its series: Survivor Series, a
+# recurring sporting event).
+_used = f"""{{ {ENWIKI} {CANDIDATE} ?item wdt:P31 ?cls . }}"""
+# The edges from such classes to what they are instances of (read with the
+# subclass edges by the build).
+QUERIES["seriesof"] = f"""
+SELECT DISTINCT ?a ?b WHERE {{
+  {{ SELECT DISTINCT ?a WHERE {{ {_used.replace("?cls", "?a")} }} }}
+  FILTER NOT EXISTS {{ ?a wdt:P279 [] }}
+  ?a wdt:P31 ?b .
+}}"""
+
+
+def subclass_extra():
+    """Subclass edges above the classes the two queries above add (what
+    class-only items are subclasses of, what series are instances of), which
+    the main subclass query doesn't reach. Built from those queries' results."""
+    start = set()
+    for name, col in (("noclass", "cls"), ("seriesof", "b")):
+        with open(os.path.join(RAW, f"{name}.csv"), newline="", encoding="utf-8") as f:
+            start |= {r[col].rsplit("/", 1)[1] for r in csv.DictReader(f)}
+    values = " ".join(f"wd:{q}" for q in sorted(start) if q.startswith("Q"))
+    return f"""
+SELECT DISTINCT ?a ?b WHERE {{
+  VALUES ?c {{ {values} }}
+  ?c wdt:P279* ?a .
+  ?a wdt:P279 ?b .
+}}"""
+
+
+QUERIES["subclass_extra"] = subclass_extra  # (a function: it needs the two queries above first)
+
+for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249", "P577"]:
     QUERIES[f"date_{prop}"] = f"""
 SELECT ?item (?tv AS ?t) (?pr AS ?prec) ?cal ?rk WHERE {{
   {ENWIKI}
@@ -227,6 +277,9 @@ SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) {PACKED_DATE}
 OWN_SITE = """ UNION {
     ?item wdt:P625 ?co . BIND(1 AS ?site)
     FILTER NOT EXISTS { ?item wdt:P189 ?_p . ?_p wdt:P625 [] }
+    # Not a country, continent, ocean, sea, bay, current or region at its centre
+    # point (the Gulf Stream "discovered" off Cape Hatteras).
+    FILTER NOT EXISTS { ?item wdt:P31 ?_b VALUES ?_b { wd:Q6256 wd:Q3624078 wd:Q5107 wd:Q9430 wd:Q165 wd:Q4022 wd:Q129558 wd:Q39594 wd:Q82794 wd:Q34763 } }
   }"""
 
 # Works first performed at a known venue (operas, ballets, plays, symphonies),
@@ -295,6 +348,8 @@ def run(name, query, force=False):
     if os.path.exists(path) and not force:
         print(f"[skip] {name} (cached)")
         return
+    if callable(query):
+        query = query()
     body = urllib.parse.urlencode({"query": PREFIX + query}).encode()
     req = urllib.request.Request(ENDPOINT, data=body, headers={
         "User-Agent": UA,

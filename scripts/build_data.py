@@ -36,7 +36,7 @@ import urllib.parse
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(__file__))
-from categories import CATEGORIES, EVENT_ROLES, KEEP_EVENTS, NOT_EVENTS, PLACE_ROLES, ROLE_PRIORITY, ROOTS  # noqa: E402
+from categories import CATEGORIES, DROP_ITEMS, EVENT_ROLES, KEEP_EVENTS, NOT_EVENTS, PLACE_ROLES, ROLE_PRIORITY, ROOTS  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 RAW = os.path.join(ROOT, "build", "raw")
@@ -80,6 +80,7 @@ WEIGHT = {
     "disaster": 0.9,
     "culture": 0.9,
     "science": 0.9,
+    "exploration": 0.9,
     "sports": 0.5,
     "event": 0.75,  # dated event with no recognised class
     "premiere": 0.8,
@@ -101,13 +102,13 @@ WEIGHT = {
 # description when the wording is unambiguous ("Battle of...", "... mine disaster").
 GUESS_CAT = [
     ("conflict", re.compile(r"\b(battle|siege|action of|raid|massacre|war|rebellion|uprising|revolt|invasion|"
-                            r"bombing|attack|skirmish|insurgency|mutiny|ambush|offensive|campaign against|"
-                            r"naval engagement|sack of|capture of|liberation of|occupation of|pogrom|"
-                            r"shooting|assassination|terrorist|clash|clashes|coup|riot|riots|fighting|incursion)\b", re.I)),
-    ("disaster", re.compile(r"\b(disaster|earthquake|flood|fire|explosion|hurricane|typhoon|cyclone|tornado|"
+                            r"bombings?|(?<!shark )attacks?|skirmish|insurgency|mutiny|ambush|offensive|campaign against|"
+                            r"naval engagement|sack of|capture of|liberation of|occupation of|pogroms?|massacres|"
+                            r"shootings?|assassination|terrorist|clash|clashes|coup|riot|riots|fighting|incursion)\b", re.I)),
+    ("disaster", re.compile(r"\b(disasters?|earthquakes?|floods?|fires?|explosions?|hurricane|typhoon|cyclone|tornado(es)?|"
                             r"eruption|tsunami|famine|epidemic|pandemic|outbreak|plague|crash|derailment|"
                             r"shipwreck|sinking|collapse|landslide|avalanche|blizzard|heat wave|drought|"
-                            r"accident|stampede|wreck|meteor|wildfires?|bushfires?|heatwave|blackout)\b"
+                            r"accident|stampede|wreck|meteor|wildfires?|bushfires?|heatwave|blackout|shark attacks?)\b"
                             r"|\bFlight \d+\b", re.I)),
     # Editions of contests and shows: held to the sports bar (very notable only).
     ("sports", re.compile(r"\b(championships?|grand prix|draft|tournament|cup|bowl|regatta|marathon|derby|"
@@ -149,10 +150,22 @@ NATIONWIDE_MIN_SITELINKS = 10  # events known only by country must be this notab
 ELECTION_MIN_SITELINKS = 40  # national elections too (they'd crowd every capital)
 WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
 THING_WEIGHT = 0.3  # found, premiered or launched things that aren't moments
-LAUNCH_MIN_SITELINKS = 25
+LAUNCH_MIN_SITELINKS = 18  # probes, landers and firsts (Pioneer 5, IM-1, Mercury-Redstone 2)
+ROUTINE_LAUNCH_MIN_SITELINKS = 25  # crew rotations and shuttle flights: the famous ones only
+ROUTINE_WEIGHT = 0.35  # those kept count for less, so a hundred shuttle flights don't crowd the world view
+FAMOUS_FLIGHTS = {"STS-1", "STS-7", "STS-31", "STS-61", "STS-88", "STS-135", "Soyuz 1", "Soyuz 11", "Soyuz 19", "SpaceX Crew-1"}
+ROUTINE_CREWED = re.compile(r"^(Soyuz (\d+|T-\d+|TM-\d+|TMA-\d+M?|MS-\d+)|STS-\d+|SpaceX Crew-\d+|Shenzhou 1\d|Axiom Mission [2-9])$")
 WRECK_MIN_SITELINKS = 20  # the Lusitania and the Bismarck, not every U-boat
 SPORTS_MIN_SITELINKS = 60  # Olympics, World Cups and continental cups; not every league season
 EDITION_ROOTS = {"Q27020041", "Q27968055"}  # sports season, recurring event edition
+# A year in the title marks a yearly edition too (2014 Tour de France, Super Bowl XL).
+EDITION_TITLE = re.compile(r"^(\d{4}(–\d{2,4})? |Super Bowl [LXVI\d]+\b)")
+# Overview and follow-up articles, not events: "History of ...", "Aftermath of ...", "X–Y relations".
+NOT_EVENT_TITLE = re.compile(r"^(History of|Timeline of|Aftermath of|Humanitarian response to|International reactions to|Reactions to) "
+                             r"|–.+ relations$")
+# Cancelled events didn't happen (cancelled plans and operations are history, though).
+CANCELLED = re.compile(r"\bcancell?ed\b", re.I)
+CANCELLED_KEEP = re.compile(r"\b(plan|operation|invasion)\b", re.I)
 MATCH_MIN_SITELINKS = 20  # one-off matches and fights (the Miracle on Ice, the Rumble in the Jungle)
 # Minimum sitelinks by the root an event's class reached.
 ROOT_MIN_SITELINKS = {
@@ -163,17 +176,21 @@ ROOT_MIN_SITELINKS = {
     "Q40231": 20,  # public election
     "Q29102902": 20,  # papal election
     "Q464980": 10,  # exhibition (the yearly Paris Salons and Royal Academy shows)
+    "Q24706": 25,  # Japanese era name (Meiji, Taishō, Shōwa, Heisei, Reiwa; not the 240 others)
 }
 # Crashes and wrecks: a start point is the departure airport or port, not the place.
 TRANSPORT_ROOTS = {"Q744913", "Q1078765", "Q3002150", "Q852190"}
+FALLBACK_DEPTH = 3  # how far up a class-only item's superclasses still say what it is
 BOUNDED_YEARS = 30  # an event dated only by inception and dissolution lasts at most this long
 # Treaties, laws and the like: their end date is a repeal, not part of the event.
-DOCUMENT_ROOTS = {"Q131569", "Q820655", "Q7748", "Q1156854", "Q546113", "Q3771738", "Q93288"}
+DOCUMENT_ROOTS = {"Q131569", "Q820655", "Q7748", "Q3771738", "Q93288"}  # (not policies: the New Deal had years)
+LEGAL_ROOTS = {"Q2334719", "Q8016240", "Q16738832"}  # legal case, trial, criminal case
+PUBLISHED_MIN_SITELINKS = 20  # laws and court cases dated only by publication (Roe v. Wade, not every constitution)
 # Individual deaths and crimes: famous cases only (not assassinations).
 PERSONAL = re.compile(r"^(Murder|Killing|Death|Disappearance|Kidnapping|Abduction|Shooting|Stabbing) (of|and) ", re.I)
 PERSONAL_MIN_SITELINKS = 20
 # Parts of a bigger event that has its own pin or chip.
-SUB_EVENT = re.compile(r" at the \d{4} (Summer|Winter|Youth) (Olympics|Paralympics)$| in the Eurovision Song Contest( \d{4})?$"
+SUB_EVENT = re.compile(r" at the \d{4} (Summer|Winter|Youth) (Olympics|Paralympics)( – .+)?$| in the Eurovision Song Contest( \d{4})?$"
                        r"|\b(opening|closing) ceremony$", re.I)
 MIN_FOUNDING_HAPPENING = 1.5  # roughly 3+ sitelinks for a building, 5+ for a town
 MIN_ESTABLISHED_HAPPENING = 3.0  # institutions, firms etc. need ~7+ sitelinks
@@ -189,33 +206,77 @@ def qid(uri):
     return int(uri.rsplit("/Q", 1)[1])
 
 
-def read(name):
-    with open(os.path.join(RAW, f"{name}.csv"), newline="", encoding="utf-8") as f:
+def read(name, optional=False):
+    path = os.path.join(RAW, f"{name}.csv")
+    if optional and not os.path.exists(path):
+        return  # a query added since the raw data was last fetched
+    with open(path, newline="", encoding="utf-8") as f:
         yield from csv.DictReader(f)
 
 
 def load_old_names():
-    """Current name -> [(from, to, name of the time)] from basemap/old-names.json."""
+    """Current name -> [(from, to, name of the time, box or None)] from
+    basemap/old-names.json, and East Germany's outline from the 1886+ borders."""
     with open(os.path.join(ROOT, "basemap", "old-names.json"), encoding="utf-8") as f:
         table = json.load(f)
     names = defaultdict(list)
     for e in table["countries"] + table["cities"]:
-        if e.get("data", True):
-            for n in e["names"]:
-                names[n].extend(e["eras"])
+        for n in e["names"]:
+            names[n].extend((a, b, old, e.get("where")) for a, b, old in e["eras"])
+    with open(os.path.join(ROOT, "basemap", "borders", "cshapes.json"), encoding="utf-8") as f:
+        topo = json.load(f)
+    arcs = []
+    for a in topo["arcs"]:
+        x = y = 0
+        pts = []
+        for i in range(0, len(a), 2):
+            x, y = x + a[i], y + a[i + 1]
+            pts.append((x / topo["q"], y / topo["q"]))
+        arcs.append(pts)
+    gdr = next(s for s in topo["shapes"] if s[0] == "East Germany" and s[2][0] <= 1960.5 < s[2][1])
+    names[None] = [[[p for i in ids for p in (arcs[i] if i >= 0 else arcs[~i][::-1])] for ids in poly] for poly in gdr[6]]
     return names
 
 
-def name_of_time(label, year, names):
-    """"Saint Petersburg" in 1950 -> "Leningrad"; each part of "Russia, Ukraine"."""
+def inside(pt, polys):
+    """Is (lat, lng) inside any of these GeoJSON polygons (even-odd rule)?"""
+    y, x = pt
+    hit = False
+    for poly in polys:
+        for ring in poly:
+            for (x1, y1), (x2, y2) in zip(ring, ring[1:] + ring[:1]):
+                if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+                    hit = not hit
+    return hit
+
+
+def name_of_time(label, year, names, pt):
+    """"Saint Petersburg" in 1950 -> "Leningrad"; each part of "Russia, Ukraine".
+    pt (lat, lng) decides boxed renames and which Germany 1949-1990 means."""
     parts = []
     for part in label.split(", "):
-        for a, b, old in names.get(part, ()):
-            if (a is None or a <= year) and (b is None or year < b):
+        for a, b, old, box in names.get(part, ()):
+            if (a is None or a <= year) and (b is None or year < b) \
+                    and (box is None or box[0] <= pt[1] <= box[2] and box[1] <= pt[0] <= box[3]):
                 part = old
                 break
+        else:
+            if part == "Germany" and 1949 <= year < 1990:
+                # Divided Berlin stays Berlin; elsewhere, which side of the border.
+                if km(pt, (52.52, 13.405)) < 25:
+                    part = "Berlin"
+                else:
+                    part = "East Germany" if inside(pt, names[None]) else "West Germany"
         parts.append(part)
     return ", ".join(parts)
+
+
+def load_vital():
+    """QIDs of events on Wikipedia's lists of vital articles (scripts/vital.csv):
+    iconic by Wikipedia's own reckoning, so they skip the notability bars and
+    get their own share of the world view."""
+    with open(os.path.join(os.path.dirname(__file__), "vital.csv"), newline="", encoding="utf-8") as f:
+        return {int(r["qid"][1:]) for r in csv.DictReader(f)}
 
 
 def overrides():
@@ -453,8 +514,9 @@ def clean_desc(s):
 def main():
     print("resolving classes…")
     parents = defaultdict(set)
-    for r in read("subclass"):
-        parents[r["a"].rsplit("/", 1)[1]].add(r["b"].rsplit("/", 1)[1])
+    for name in ("subclass", "seriesof", "subclass_extra"):  # seriesof: classes with no superclass, by what they are
+        for r in read(name, optional=True):
+            parents[r["a"].rsplit("/", 1)[1]].add(r["b"].rsplit("/", 1)[1])
     role_of_root = {}
     for role in ROLE_PRIORITY:
         for q in ROOTS[role]:
@@ -495,10 +557,11 @@ def main():
     print("loading items…")
     items = {}
     for r in read("items"):
-        if r["title"].startswith("List of") or NAMESPACED.match(r["title"]):
+        if r["title"].startswith("List of") or NAMESPACED.match(r["title"]) or NOT_EVENT_TITLE.search(r["title"]):
             continue
         i = qid(r["item"])
-        items[i] = {"title": r["title"], "sl": int(r["sl"] or 0)}
+        if f"Q{i}" not in DROP_ITEMS:
+            items[i] = {"title": r["title"], "sl": int(r["sl"] or 0)}
 
     for r in read("meta"):
         it = items.get(qid(r["item"]))
@@ -519,6 +582,22 @@ def main():
                 best_excl[i] = excl
             if weak is not None:
                 weak_excl.add(i)
+
+    # Items with no "instance of" are kinds of thing (Counties of Sweden, the
+    # US hundred-dollar bill): judged by what they are a subclass of, near
+    # matches only (the Flight and expulsion of Germans is a deportation, an
+    # organization only eight steps up).
+    fallback = defaultdict(list)
+    for r in read("noclass", optional=True):
+        i = qid(r["item"])
+        c = r["cls"].rsplit("/", 1)[1]
+        if i in items and i not in item_classes:
+            fallback[i].append(c)
+            keep, excl, weak = class_role(c)
+            if keep and keep[0] <= FALLBACK_DEPTH and (i not in best_keep or keep < best_keep[i]):
+                best_keep[i] = keep
+            if excl is not None and excl <= FALLBACK_DEPTH and excl < best_excl.get(i, 99):
+                best_excl[i] = excl
 
     # National elections are known only by country and would crowd the
     # capitals of the recent past: they don't get the country fallback.
@@ -563,6 +642,10 @@ def main():
         keep, excl = best_keep.get(i), best_excl.get(i)
         if i in vehicles:
             return "exclude"
+        # A modern country, whatever else it also is (Israel is also a "region").
+        direct = item_classes.get(i, ())
+        if ("Q6256" in direct or "Q3624078" in direct) and "Q3024240" not in direct:
+            return "exclude"
         if keep is None and i in weak_excl:
             return "exclude"
         if excl is not None and (keep is None or excl < keep[0]):
@@ -596,12 +679,14 @@ def main():
         valid = [c for c in cs if (c[2] is None or c[2] <= year) and (c[3] is None or year <= c[3])]
         if valid:
             # The one in office then (a dated term beats an open-ended one).
-            return max(valid, key=lambda c: (c[2] is not None and c[3] is not None, c[0], c[2] or -99999))[1]
+            # On a tie, the one that lasted longer (the Qing's Beijing, not Shenyang).
+            return max(valid, key=lambda c: (c[2] is not None and c[3] is not None, c[0], c[2] or -99999,
+                                             c[3] if c[3] is not None else 99999))[1]
         return max(cs, key=lambda c: (c[0], c[3] is None))[1]
 
     # Locations from P276. Vague ones (countries, states, continents, oceans,
     # seas, regions, or anything over VAGUE_AREA) aren't pinned on directly.
-    locs = defaultdict(dict)  # item -> location -> [point, vague, huge, has capital, label, start point]
+    locs = defaultdict(dict)  # item -> location -> [point, vague, huge, has capital, label, start point, sitelinks, archive]
     for r in read("loccoords"):
         i = qid(r["item"])
         pt = parse_point(r["c"])
@@ -612,7 +697,8 @@ def main():
             area = float(r["area"] or 0)
         except ValueError:
             area = 0
-        cur = locs[i].setdefault(r["loc"], [pt, False, False, False, r["label"] or "", bool(r.get("start"))])
+        cur = locs[i].setdefault(r["loc"], [pt, False, False, False, r["label"] or "", bool(r.get("start")),
+                                            int(float(r.get("lsl") or 0)), bool(r.get("arch"))])
         # A capital marks a region, unless the place is city-sized (Beijing
         # and Tokyo have one: their seat of government).
         cur[1] = cur[1] or bool(big) or area > VAGUE_AREA or bool(r["cap"]) and not area
@@ -644,7 +730,7 @@ def main():
             centred.add(i)
             countries[i][r["country"]] = (coords[i], r["label"] or "")
 
-    def locate(i, year, starts=True):
+    def locate(i, year, starts=True, document=False):
         """-> (point, place label, how) for an event. how is None for a real
         place, "country" for a country's capital (notable events only), or
         (points, labels) for an event spread over places far apart or over one
@@ -653,9 +739,10 @@ def main():
         may stand in for the place (not for a plane crash's departure airport)."""
         if i in coords and i not in centred:
             return coords[i], "", None
-        ls = {loc: v for loc, v in locs.get(i, {}).items() if starts or not v[5]}
+        ls = {loc: v for loc, v in locs.get(i, {}).items() if (starts or not v[5]) and not (document and v[7])}
         if ls:
-            vals = list(ls.items())
+            # Best-known first, not whichever place Wikidata happens to list first.
+            vals = sorted(ls.items(), key=lambda kv: -kv[1][6])
             specific = [v[0] for _, v in vals if not v[1]]
             regions = sum(v[2] for _, v in vals)
             if specific and spread(specific) <= LOCAL_KM and regions < 2:
@@ -703,8 +790,8 @@ def main():
         return "Worldwide" if spread(pts) > WORLD_KM else ""
 
     dates = defaultdict(lambda: defaultdict(list))  # item -> property -> [(rank, date)]
-    for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249"]:
-        for r in read(f"date_{prop}"):
+    for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249", "P577"]:
+        for r in read(f"date_{prop}", optional=prop == "P577"):
             i = qid(r["item"])
             rk = rank_of(r["rk"])
             if i in items and rk:
@@ -719,6 +806,7 @@ def main():
         if it["sl"] >= DROPPED_MIN_SITELINKS:
             dropped.append((it["sl"], f"Q{i}", it["title"], role or "", reason))
 
+    vital = load_vital() | {int(q[1:]) for q in KEEP_EVENTS}  # (hand-picked ones skip the bars too)
     print("classifying…")
     happenings = []
     worldwide_recs = []  # no single place: listed and searchable, never pinned
@@ -727,6 +815,9 @@ def main():
 
     for i, it in items.items():
         role = item_role(i)
+        if role == "exclude" and i in vital:  # World War II in Yugoslavia is a vital article, not a sub-article
+            k = best_keep.get(i)
+            role = k[2] if k else None
         if role == "exclude":
             stats["excluded"] += 1
             drop(i, it, role, "excluded")
@@ -740,8 +831,12 @@ def main():
         # precise date says the same thing, the vague one doesn't stretch the span.
         precise = lambda d: d is not None and d[3] >= 9
         if precise(pit_d) or precise(p580) and precise(p582):
-            p580 = p580 if precise(p580) else None
-            p582 = p582 if precise(p582) else None
+            # ...only when it says the same thing: The Troubles' "1960s" start
+            # stays next to its precise 1998 end.
+            anchors = [d for d in (pit_d, p580, p582) if precise(d)]
+            covers = lambda v: any(span(v)[0] <= d[0] <= span(v)[1] for d in anchors)
+            p580 = p580 if precise(p580) or p580 and not covers(p580) else None
+            p582 = p582 if precise(p582) or p582 and not covers(p582) else None
             pit_d = pit_d if precise(pit_d) else None
             pits = [d for d in pits if d[3] >= 9]
         elif pit_d and (precise(p580) or precise(p582)):
@@ -755,19 +850,20 @@ def main():
             p580 = None
         # Signed on one day, in force from a later one (the Lateran Treaty,
         # 1929-1985): the signing is the event.
-        if pit_d and p580 and pit_d[3] >= 11 and p580[3] >= 11 and pit_d < p580:
+        if pit_d and p580 and pit_d[3] >= 11 and p580[3] >= 11 and pit_d < p580 and keep_root(i) in DOCUMENT_ROOTS:
             p580 = p582 = None
-        start_d = p580 or pit_d or p582
+        # Only an end: a typo'd start (Kuwait), unless it's a treaty or law,
+        # whose end is its repeal (the Meiji Constitution ended in 1947).
+        start_d = p580 or pit_d or (p582 if keep_root(i) not in DOCUMENT_ROOTS else None)
         end_d = p582 or pit_d
         # Founding, opening, or failing those the earliest written record (Moscow, 1147).
         found_d = best(ds.get("P571")) or best(ds.get("P1619")) or best(ds.get("P1249"))
-        # Unclassified and founded: a place if it has a point of its own, else
-        # more likely a document signed on a known day (the Atlantic Charter).
+        # Unclassified and founded: a place (dropped without a point of its own:
+        # a typeface or a streaming service has a founding date and a country).
         # Treaties and laws are dated by their inception, if that's all there is.
         # A precise point in time makes it an event (the Tsar Bomba, made in
         # 1956, was set off on 30 October 1961).
-        document = found_d is not None and (keep_root(i) in DOCUMENT_ROOTS
-                                            or cat is None and found_d[3] >= 11 and i not in coords)
+        document = found_d is not None and keep_root(i) in DOCUMENT_ROOTS
         is_place = role in PLACE_ROLES or (cat is None and found_d is not None and not document
                                            and not (pit_d and pit_d[3] >= 11))
         sl = it["sl"]
@@ -779,7 +875,8 @@ def main():
                 cat = KEEP_EVENTS.get(f"Q{i}") or guess_cat(it["title"])
                 if cat:
                     stats[f"guessed:{cat}"] += 1
-                elif any(not_event(c) for c in item_classes.get(i, ())):
+                elif any(not_event(c) for c in item_classes.get(i, ())) \
+                        or any(c in NOT_EVENTS or any(descends(c, e, FALLBACK_DEPTH) for e in NOT_EVENTS) for c in fallback.get(i, ())):
                     # Dated, but a thing (Tequila, a car model, a language
                     # family) rather than something that happened.
                     stats["not_an_event"] += 1
@@ -788,11 +885,15 @@ def main():
             # Some kinds of event only make the map when well known: murders,
             # ceremonies, conventions, local politics, exhibitions, contests.
             bar = max(ROOT_MIN_SITELINKS.get(keep_root(i), 0), PERSONAL_MIN_SITELINKS if PERSONAL.match(it["title"]) else 0)
-            if it["title"].startswith("Assassination"):
+            if it["title"].startswith("Assassination") or i in vital:
                 bar = 0
             if sl < bar or SUB_EVENT.search(it["title"]):
                 stats["below_bar"] += 1
                 drop(i, it, role, "below the bar for its kind")
+                continue
+            if CANCELLED.search(it.get("desc", "")) and not CANCELLED_KEEP.search(it.get("desc", "") + " " + it["title"]):
+                stats["cancelled"] += 1
+                drop(i, it, role, "cancelled")
                 continue
             if start_d is None and found_d:
                 # Dated only by inception and end (the Rivonia Trial, the
@@ -803,6 +904,8 @@ def main():
                     start_d = end_d = found_d
                 elif gone_d and 0 <= gone_d[0] - found_d[0] <= BOUNDED_YEARS:
                     start_d, end_d = found_d, gone_d
+            if start_d is None and keep_root(i) in DOCUMENT_ROOTS | LEGAL_ROOTS and (sl >= PUBLISHED_MIN_SITELINKS or i in vital):
+                start_d = end_d = best(ds.get("P577"))  # laws and court cases dated by publication (Roe v. Wade)
             if keep_root(i) in DOCUMENT_ROOTS and start_d and end_d and end_d[0] - start_d[0] > 1:
                 end_d = start_d  # signed once; years in force aren't the event
             if start_d is None:
@@ -814,20 +917,21 @@ def main():
             if not p580 and not p582 and len(pits) > 1 and all(d[3] >= 11 for d in pits) \
                     and pits[-1][0] == pits[0][0] and day_of_year(pits[-1]) - day_of_year(pits[0]) <= 10:
                 start_d, end_d = pits[0], pits[-1]
-            pt, place, how = locate(i, span(start_d)[0], starts=keep_root(i) not in TRANSPORT_ROOTS)
+            pt, place, how = locate(i, span(start_d)[0], starts=keep_root(i) not in TRANSPORT_ROOTS,
+                                    document=document or keep_root(i) in DOCUMENT_ROOTS | LEGAL_ROOTS)
             notable = cat != "sports" or sl >= SPORTS_MIN_SITELINKS  # (unclassified events show as politics)
             worldwide = False
             if how == "country":
                 # Known only by country: the capital, for events notable enough
                 # (elections would crowd every capital). Not for expeditions or
                 # meetings, which happened anywhere but there.
-                if notable and sl >= NATIONWIDE_MIN_SITELINKS and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS) \
-                        and cat != "science" and keep_root(i) != "Q2761147":
+                if notable and (sl >= NATIONWIDE_MIN_SITELINKS and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS) or i in vital) \
+                        and cat not in ("science", "exploration") and keep_root(i) != "Q2761147":
                     stats["event:nationwide"] += 1
                 else:
                     pt, place = None, ""
             elif how:
-                if notable and sl >= (WIDE_VOYAGE_MIN_SITELINKS if cat == "science" else WORLDWIDE_MIN_SITELINKS):
+                if notable and (sl >= (WIDE_VOYAGE_MIN_SITELINKS if cat in ("science", "exploration") else WORLDWIDE_MIN_SITELINKS) or i in vital):
                     # Spread over places far apart: no pin, listed while in view.
                     place, pt, worldwide = wide_label(*how), centroid(how[0]), True
                     stats["event:wide"] += 1
@@ -837,7 +941,8 @@ def main():
                 stats["event_nocoord"] += 1
                 drop(i, it, role, "event: no usable place")
                 continue
-            if cat == "sports" and sl < (SPORTS_MIN_SITELINKS if keep_root(i) in EDITION_ROOTS else MATCH_MIN_SITELINKS):
+            if cat == "sports" and i not in vital and sl < (SPORTS_MIN_SITELINKS if keep_root(i) in EDITION_ROOTS or EDITION_TITLE.match(it["title"])
+                                                            else MATCH_MIN_SITELINKS):
                 stats["sports_dropped"] += 1
                 drop(i, it, role, "sports/edition under the bar")
                 continue
@@ -911,7 +1016,7 @@ def main():
         ("deaths", DIED, "people", "died"),
         ("premieres", PREMIERED, "culture", "premiere"),
         ("discoveries", DISCOVERED, "science", "discovery"),
-        ("launches", LAUNCHED, "science", "launch"),
+        ("launches", LAUNCHED, "exploration", "launch"),
         ("wrecks", SANK, "disaster", "wreck"),
     ):
         for r in read(kind_name):
@@ -925,8 +1030,9 @@ def main():
                 # Sitelinks here measure the thing (oxygen, a symphony), not
                 # the moment it was found or first heard: cap them.
                 r["sl"] = str(min(int(r["sl"] or 0), WORK_MAX_SITELINKS))
-            if kind == LAUNCHED and int(r["sl"] or 0) < LAUNCH_MIN_SITELINKS:
-                continue  # weather and communications satellites
+            if kind == LAUNCHED and int(r["sl"] or 0) < (ROUTINE_LAUNCH_MIN_SITELINKS if ROUTINE_CREWED.match(r["title"])
+                                                          else LAUNCH_MIN_SITELINKS):
+                continue  # minor satellites, routine crew flights
             if kind == SANK and int(r["sl"] or 0) < WRECK_MIN_SITELINKS:
                 continue
             s0, s1 = span(d)
@@ -937,6 +1043,8 @@ def main():
             # A fossil genus, an element, a moon or a film is a thing more than a
             # moment: it stays on the map, but well behind the events.
             thing = THING_WEIGHT if r.get("thing") and kind != LAUNCHED else 1  # spacecraft count as "objects"
+            if kind == LAUNCHED and ROUTINE_CREWED.match(r["title"]) and r["title"] not in FAMOUS_FLIGHTS:
+                thing = ROUTINE_WEIGHT
             score = round(sl * WEIGHT[weight] * thing * (IMAGE_BONUS if img else 1), 1)
             i = qid(r["item"])
             if kind in (PREMIERED, DISCOVERED, LAUNCHED, SANK) and not r.get("own"):
@@ -947,6 +1055,13 @@ def main():
     # A found object or premiered work is shown where it happened, not as a
     # "place" at the museum or theatre that holds it today.
     happenings = [h for h in happenings if not (h[0] in found and h[7] not in HAPPENED)]
+    # The same item twice: an event that is also a discovery keeps the event
+    # (the Tunguska event), a mission that is also a launch keeps the launch.
+    kinds_of = defaultdict(set)
+    for h in happenings:
+        kinds_of[h[0]].add(h[7])
+    happenings = [h for h in happenings if not (h[7] == DISCOVERED and EVENT in kinds_of[h[0]]
+                                                or h[7] == EVENT and LAUNCHED in kinds_of[h[0]])]
     # A ship whose sinking is already on the map as an event ("Sinking of RMS
     # Lusitania", the "Kursk submarine disaster"): the event only. (The Mary
     # Rose stays next to the Battle of the Solent.)
@@ -996,7 +1111,7 @@ def main():
     old_names = load_old_names()
     for r in happenings + worldwide_recs + standing:
         if r[12]:
-            renamed = name_of_time(r[12], r[4], old_names)
+            renamed = name_of_time(r[12], r[4], old_names, (r[2], r[3]))
             if renamed != r[12]:
                 r[12] = renamed
                 stats["renamed_places"] += 1
@@ -1027,7 +1142,7 @@ def main():
         print(f"  {k}: {v}")
     print(f"  happenings: {len(happenings)}  standing: {len(standing)}")
 
-    write(happenings, standing, worldwide_recs)
+    write(happenings, standing, worldwide_recs, vital)
 
 
 _digest = hashlib.sha1()
@@ -1116,7 +1231,7 @@ def quadtree(recs, max_n, write_leaf):
     split(recs, -180, -90, 180, 90, "")
 
 
-def write(happenings, standing, worldwide):
+def write(happenings, standing, worldwide, vital=frozenset()):
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
     os.makedirs(OUT)
@@ -1131,8 +1246,11 @@ def write(happenings, standing, worldwide):
     lives = lambda r: r[7] in (BORN, DIED)
     # Long ones by the quarter millennium they began in (one slice for all
     # of them buried the Minoan eruption under Rome and Byzantium).
+    # Vital events have their own share of each tile: crowded years (1914,
+    # 1941) no longer bury the Christmas truce or the Dominican Civil War.
     for recs, key in ((short, lambda r: time_slice(r[4])), (long_, lambda r: r[4] // 250)):
-        assign_minzoom([r for r in recs if happened(r)], key)
+        assign_minzoom([r for r in recs if happened(r) and r[0] in vital], key)
+        assign_minzoom([r for r in recs if happened(r) and r[0] not in vital], key)
         assign_minzoom([r for r in recs if not happened(r) and not lives(r)], key, LOD_K_OTHER, LOD_OTHER_OFFSET)
         assign_minzoom([r for r in recs if lives(r)], key, LOD_K_OTHER, LOD_OTHER_OFFSET)
     # A barely known item doesn't belong in the world view just because its
