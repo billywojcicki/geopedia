@@ -122,7 +122,7 @@ SELECT DISTINCT ?item ?c WHERE {{
     # port, a march's first town). ?cap/?big flag locations that are countries,
     # states, oceans etc. (their coordinate is a meaningless centroid).
     "loccoords": f"""
-SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area ?start ?lsl WHERE {{
+SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area ?start ?lsl ?arch WHERE {{
   {ENWIKI}
   {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }} UNION {{ ?item wdt:P571 [] }} UNION {{ ?item wdt:P577 [] }}
   {{ ?item wdt:P276 ?loc }} UNION {{
@@ -130,9 +130,11 @@ SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area ?start ?lsl WHERE {{
     FILTER NOT EXISTS {{ ?item wdt:P276 ?_l . ?_l wdt:P625 [] }}
   }}
   ?loc wdt:P625 ?c .
-  # Not the archive or library that keeps a document (the Treaty of
-  # Tordesillas is not an event in Lisbon's Torre do Tombo).
-  FILTER NOT EXISTS {{ ?loc wdt:P31/wdt:P279* ?_a VALUES ?_a {{ wd:Q166118 wd:Q7075 }} }}
+  # Archives and libraries: where a document is kept, not where it was
+  # signed (the Treaty of Tordesillas is not an event in Lisbon's Torre do
+  # Tombo); the build ignores them for documents only (the Dumbarton Oaks
+  # Conference did meet at Dumbarton Oaks).
+  OPTIONAL {{ ?loc wdt:P31/wdt:P279* ?_a VALUES ?_a {{ wd:Q166118 wd:Q7075 }} BIND(1 AS ?arch) }}
   OPTIONAL {{ ?loc wikibase:sitelinks ?lsl }}  # the build prefers the best-known of several places
   FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
   OPTIONAL {{ ?loc wdt:P36 ?cap OPTIONAL {{ ?cap wdt:P625 ?capc }} }}
@@ -201,21 +203,18 @@ SELECT DISTINCT ?item ?cls WHERE {{
 }}"""
 
 # Subclass (P279) edges above every class our items use, so the build can
-# find each class's *nearest* category root instead of any ancestor. A class
-# with no superclass of its own is followed through what it is an instance
-# of (an edition's class is often its series: Survivor Series, a recurring
-# sporting event).
-_used = f"""{{ {ENWIKI} {CANDIDATE} ?item wdt:P31 ?cls . }}
-    UNION {{ {ENWIKI} {CANDIDATE} FILTER NOT EXISTS {{ ?item wdt:P31 [] }} ?item wdt:P279 ?cls . }}"""
+# find each class's *nearest* category root instead of any ancestor.
 QUERIES["subclass"] = f"""
 SELECT DISTINCT ?a ?b WHERE {{
-  {{ SELECT DISTINCT ?c WHERE {{
-    {{ SELECT DISTINCT ?cls WHERE {{ {_used} }} }}
-    {{ BIND(?cls AS ?c) }} UNION {{ ?cls wdt:P31 ?c . FILTER NOT EXISTS {{ ?cls wdt:P279 [] }} }}
-  }} }}
-  ?c wdt:P279* ?a .
+  {{ SELECT DISTINCT ?cls WHERE {{ {ENWIKI} {CANDIDATE} ?item wdt:P31 ?cls . }} }}
+  ?cls wdt:P279* ?a .
   ?a wdt:P279 ?b .
 }}"""
+
+# A class with no superclass of its own is followed through what it is an
+# instance of (an edition's class is often its series: Survivor Series, a
+# recurring sporting event).
+_used = f"""{{ {ENWIKI} {CANDIDATE} ?item wdt:P31 ?cls . }}"""
 # The edges from such classes to what they are instances of (read with the
 # subclass edges by the build).
 QUERIES["seriesof"] = f"""
@@ -224,6 +223,26 @@ SELECT DISTINCT ?a ?b WHERE {{
   FILTER NOT EXISTS {{ ?a wdt:P279 [] }}
   ?a wdt:P31 ?b .
 }}"""
+
+
+def subclass_extra():
+    """Subclass edges above the classes the two queries above add (what
+    class-only items are subclasses of, what series are instances of), which
+    the main subclass query doesn't reach. Built from those queries' results."""
+    start = set()
+    for name, col in (("noclass", "cls"), ("seriesof", "b")):
+        with open(os.path.join(RAW, f"{name}.csv"), newline="", encoding="utf-8") as f:
+            start |= {r[col].rsplit("/", 1)[1] for r in csv.DictReader(f)}
+    values = " ".join(f"wd:{q}" for q in sorted(start) if q.startswith("Q"))
+    return f"""
+SELECT DISTINCT ?a ?b WHERE {{
+  VALUES ?c {{ {values} }}
+  ?c wdt:P279* ?a .
+  ?a wdt:P279 ?b .
+}}"""
+
+
+QUERIES["subclass_extra"] = subclass_extra  # (a function: it needs the two queries above first)
 
 for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249", "P577"]:
     QUERIES[f"date_{prop}"] = f"""
@@ -329,6 +348,8 @@ def run(name, query, force=False):
     if os.path.exists(path) and not force:
         print(f"[skip] {name} (cached)")
         return
+    if callable(query):
+        query = query()
     body = urllib.parse.urlencode({"query": PREFIX + query}).encode()
     req = urllib.request.Request(ENDPOINT, data=body, headers={
         "User-Agent": UA,

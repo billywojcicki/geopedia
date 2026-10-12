@@ -503,7 +503,7 @@ def clean_desc(s):
 def main():
     print("resolving classes…")
     parents = defaultdict(set)
-    for name in ("subclass", "seriesof"):  # seriesof: classes with no superclass, by what they are
+    for name in ("subclass", "seriesof", "subclass_extra"):  # seriesof: classes with no superclass, by what they are
         for r in read(name, optional=True):
             parents[r["a"].rsplit("/", 1)[1]].add(r["b"].rsplit("/", 1)[1])
     role_of_root = {}
@@ -675,7 +675,7 @@ def main():
 
     # Locations from P276. Vague ones (countries, states, continents, oceans,
     # seas, regions, or anything over VAGUE_AREA) aren't pinned on directly.
-    locs = defaultdict(dict)  # item -> location -> [point, vague, huge, has capital, label, start point, sitelinks]
+    locs = defaultdict(dict)  # item -> location -> [point, vague, huge, has capital, label, start point, sitelinks, archive]
     for r in read("loccoords"):
         i = qid(r["item"])
         pt = parse_point(r["c"])
@@ -687,7 +687,7 @@ def main():
         except ValueError:
             area = 0
         cur = locs[i].setdefault(r["loc"], [pt, False, False, False, r["label"] or "", bool(r.get("start")),
-                                            int(float(r.get("lsl") or 0))])
+                                            int(float(r.get("lsl") or 0)), bool(r.get("arch"))])
         # A capital marks a region, unless the place is city-sized (Beijing
         # and Tokyo have one: their seat of government).
         cur[1] = cur[1] or bool(big) or area > VAGUE_AREA or bool(r["cap"]) and not area
@@ -719,7 +719,7 @@ def main():
             centred.add(i)
             countries[i][r["country"]] = (coords[i], r["label"] or "")
 
-    def locate(i, year, starts=True):
+    def locate(i, year, starts=True, document=False):
         """-> (point, place label, how) for an event. how is None for a real
         place, "country" for a country's capital (notable events only), or
         (points, labels) for an event spread over places far apart or over one
@@ -728,7 +728,7 @@ def main():
         may stand in for the place (not for a plane crash's departure airport)."""
         if i in coords and i not in centred:
             return coords[i], "", None
-        ls = {loc: v for loc, v in locs.get(i, {}).items() if starts or not v[5]}
+        ls = {loc: v for loc, v in locs.get(i, {}).items() if (starts or not v[5]) and not (document and v[7])}
         if ls:
             # Best-known first, not whichever place Wikidata happens to list first.
             vals = sorted(ls.items(), key=lambda kv: -kv[1][6])
@@ -795,7 +795,7 @@ def main():
         if it["sl"] >= DROPPED_MIN_SITELINKS:
             dropped.append((it["sl"], f"Q{i}", it["title"], role or "", reason))
 
-    vital = load_vital()
+    vital = load_vital() | {int(q[1:]) for q in KEEP_EVENTS}  # (hand-picked ones skip the bars too)
     print("classifying…")
     happenings = []
     worldwide_recs = []  # no single place: listed and searchable, never pinned
@@ -841,17 +841,18 @@ def main():
         # 1929-1985): the signing is the event.
         if pit_d and p580 and pit_d[3] >= 11 and p580[3] >= 11 and pit_d < p580 and keep_root(i) in DOCUMENT_ROOTS:
             p580 = p582 = None
-        start_d = p580 or pit_d or p582
+        # Only an end: a typo'd start (Kuwait), unless it's a treaty or law,
+        # whose end is its repeal (the Meiji Constitution ended in 1947).
+        start_d = p580 or pit_d or (p582 if keep_root(i) not in DOCUMENT_ROOTS else None)
         end_d = p582 or pit_d
         # Founding, opening, or failing those the earliest written record (Moscow, 1147).
         found_d = best(ds.get("P571")) or best(ds.get("P1619")) or best(ds.get("P1249"))
-        # Unclassified and founded: a place if it has a point of its own, else
-        # more likely a document signed on a known day (the Atlantic Charter).
+        # Unclassified and founded: a place (dropped without a point of its own:
+        # a typeface or a streaming service has a founding date and a country).
         # Treaties and laws are dated by their inception, if that's all there is.
         # A precise point in time makes it an event (the Tsar Bomba, made in
         # 1956, was set off on 30 October 1961).
-        document = found_d is not None and (keep_root(i) in DOCUMENT_ROOTS
-                                            or cat is None and found_d[3] >= 11 and i not in coords)
+        document = found_d is not None and keep_root(i) in DOCUMENT_ROOTS
         is_place = role in PLACE_ROLES or (cat is None and found_d is not None and not document
                                            and not (pit_d and pit_d[3] >= 11))
         sl = it["sl"]
@@ -905,7 +906,8 @@ def main():
             if not p580 and not p582 and len(pits) > 1 and all(d[3] >= 11 for d in pits) \
                     and pits[-1][0] == pits[0][0] and day_of_year(pits[-1]) - day_of_year(pits[0]) <= 10:
                 start_d, end_d = pits[0], pits[-1]
-            pt, place, how = locate(i, span(start_d)[0], starts=keep_root(i) not in TRANSPORT_ROOTS)
+            pt, place, how = locate(i, span(start_d)[0], starts=keep_root(i) not in TRANSPORT_ROOTS,
+                                    document=document or keep_root(i) in DOCUMENT_ROOTS | LEGAL_ROOTS)
             notable = cat != "sports" or sl >= SPORTS_MIN_SITELINKS  # (unclassified events show as politics)
             worldwide = False
             if how == "country":

@@ -305,7 +305,9 @@ NOT_EVENTS = [
 # iacta est, Vae victis), and things no class rule catches (Tequila, a caldera).
 DROP_ITEMS = {"Q665554", "Q84263196", "Q271723", "Q922557", "Q122195", "Q2071883"}
 
-# Famous moments the denylist above would catch (the Wow! signal is a signal,
-# RDS-1 and the Tsar Bomba bombs, the Radium Girls a group of people), with
-# their category.
-KEEP_EVENTS = {"Q33297": "science", "Q586755": "science", "Q188596": "science", "Q1128589": "politics"}
+# Famous moments the rules would leave out (the Wow! signal is a signal,
+# RDS-1 and the Tsar Bomba bombs, the Radium Girls a group of people, the
+# first Tour de France a yearly edition), with their category. They skip the
+# notability bars like the vital articles do.
+KEEP_EVENTS = {"Q33297": "science", "Q586755": "science", "Q188596": "science", "Q1128589": "politics",
+               "Q506911": "culture"}  # the first Tour de France (yearly editions otherwise need 60 editions)
