@@ -443,6 +443,10 @@ def commons_path(url):
 
 def clean_desc(s):
     s = (s or "").strip()
+    # Wikidata writes descriptions in lower case ("church in Venice"); in a
+    # list they read as sentences. Not names like "iPhone" or "mRNA".
+    if s[:1].islower() and not s[1:2].isupper():
+        s = s[0].upper() + s[1:]
     return s if len(s) <= 110 else s[:107].rstrip() + "…"
 
 
