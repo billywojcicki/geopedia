@@ -32,6 +32,7 @@ export class Borders {
   }
 
   toggle(on, year) {
+    clearTimeout(this.timer);
     this.on = on;
     this.lastYear = year;
     this.setModernVisible(!on);
@@ -40,15 +41,17 @@ export class Borders {
   }
 
   setYear(year, dragging) {
+    // A newer year always replaces a pending one (back to the shown era included).
+    clearTimeout(this.timer);
     this.lastYear = year;
     if (!this.on) return;
     const s = snapshotFor(year);
     if (s === this.snapshot) return;
-    clearTimeout(this.timer);
     this.timer = setTimeout(() => this.load(s), dragging ? 250 : 0);
   }
 
   load(s) {
+    if (!this.on) return;
     this.snapshot = s;
     this.ensureLayers();
     this.map.getSource('borders').setData(`${BASE}${keyFor(s)}.geojson`);
@@ -77,6 +80,8 @@ export class Borders {
         'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 6, 1.2],
       },
     }, firstSymbol);
+    // Below the pins' label blockers, so pin labels win collisions.
+    const beforePins = map.getLayer('pin-blockers') ? 'pin-blockers' : undefined;
     map.addLayer({
       id: 'borders-label', type: 'symbol', source: 'borders-labels',
       layout: {
@@ -94,10 +99,11 @@ export class Borders {
         'text-halo-color': dark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.8)',
         'text-halo-width': 1.2,
       },
-    });
+    }, beforePins);
   }
 
   removeLayers() {
+    clearTimeout(this.timer);
     const map = this.map;
     for (const id of ['borders-label', 'borders-line', 'borders-fill']) if (map.getLayer(id)) map.removeLayer(id);
     for (const id of ['borders', 'borders-labels']) if (map.getSource(id)) map.removeSource(id);

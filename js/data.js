@@ -6,13 +6,15 @@ import { STANDING_ZOOM } from './config.js';
 
 const BASE = 'data/';
 const MAX_DETAIL_FILES = 24;
+const RETRY_MS = [2000, 8000, 30000]; // a file that failed waits this long before another try
 
-// Array record -> object. Layout documented in scripts/build_data.py.
-function toRecord(a, standing) {
+// Array record -> object. Layout documented in scripts/build_data.py. `file`
+// is where it came from, so a shared link can fetch just that file.
+function toRecord(a, standing, file) {
   return {
     id: a[0], title: a[1], lat: a[2], lng: a[3], start: a[4], end: a[5],
     cat: a[6], kind: a[7], score: a[8], img: a[9], desc: a[10], date: a[11], place: a[12],
-    minzoom: standing ? 0 : a[13], standing,
+    minzoom: standing ? 0 : a[13], standing, file,
   };
 }
 
@@ -36,6 +38,8 @@ function gridKeys([w, s, e, n], z) {
   return keys;
 }
 
+// Keys of the boxes [key, w, s, e, n] that touch [w, s, e, n], nearest to its
+// centre first, at most `limit` of them (the middle of the screen matters most).
 function boxHits(entries, [w, s, e, n], limit) {
   // Normalise to [-180, 180] and split boxes that cross the antimeridian.
   const boxes = e - w >= 360 ? [[-180, s, 180, n]]
@@ -43,12 +47,16 @@ function boxHits(entries, [w, s, e, n], limit) {
       const a2 = ((a + 540) % 360) - 180, c2 = a2 + (c - a);
       return c2 > 180 ? [[a2, b, 180, d], [-180, b, c2 - 360, d]] : [[a2, b, c2, d]];
     });
-  const out = [];
+  const cx = ((((w + e) / 2) + 540) % 360) - 180, cy = (s + n) / 2;
+  const hits = [];
   for (const [key, x0, y0, x1, y1] of entries) {
-    if (boxes.some(([bw, bs, be, bn]) => x1 >= bw && x0 <= be && y1 >= bs && y0 <= bn)) out.push(key);
-    if (out.length >= limit) break;
+    if (!boxes.some(([bw, bs, be, bn]) => x1 >= bw && x0 <= be && y1 >= bs && y0 <= bn)) continue;
+    let dx = Math.abs((x0 + x1) / 2 - cx);
+    if (dx > 180) dx = 360 - dx;
+    hits.push([dx * dx + ((y0 + y1) / 2 - cy) ** 2, key]);
   }
-  return out;
+  hits.sort((p, q) => p[0] - q[0]);
+  return hits.slice(0, limit).map(h => h[1]);
 }
 
 export class Store {
@@ -56,6 +64,7 @@ export class Store {
     this.index = null;
     this.version = '';
     this.files = new Map(); // path -> records[] | Promise
+    this.failed = new Map(); // path -> [failures, time of the last one]
     this.long = [];
     this.world = []; // events with no one place (world wars): listed, never pinned
     this.search = null;
@@ -66,9 +75,10 @@ export class Store {
   async init(indexPromise) {
     this.index = await (indexPromise || this.fetchRaw('index', false));
     this.version = this.index.version;
-    this.longReady = this.fetchRaw('long').then(rows => { this.long = rows.map(a => toRecord(a, false)); this.onLoad(); });
+    this.longReady = this.fetchRaw('long').then(rows => { this.long = rows.map(a => toRecord(a, false, 'long')); this.onLoad(); })
+      .catch(() => {});
     this.worldReady = this.fetchRaw('world', true, 'low')
-      .then(rows => { this.world = rows.map(a => ({ ...toRecord(a, false), world: true })); this.onLoad(); })
+      .then(rows => { this.world = rows.map(a => ({ ...toRecord(a, false, 'world'), world: true, pts: a[14] || [] })); this.onLoad(); })
       .catch(() => {});
   }
 
@@ -88,17 +98,24 @@ export class Store {
     const lo = a - this.index.longSpan;
     const zmax = displayZoom(zoom);
     const tiers = Object.entries(this.index.tiers);
+    const detail = zmax >= this.index.detailMinz;
     for (const [name, t] of tiers) {
       if (t.minz > zmax) continue;
+      // Zoomed into a city, the detail leaves hold everything below the world tier.
+      if (detail && t.minz > 0 && this.index.leavesHoldAll) continue;
       for (const key of gridKeys(bounds, t.zoom)) {
         const chunks = t.tiles[key];
         if (!chunks) continue;
-        chunks.forEach(([from, to], i) => { if (to >= lo && from <= b) out.push(`${name}/${key}-${i}`); });
+        // [first start, last start, count, last end]: a chunk is needed if a
+        // record in it can reach into the window.
+        chunks.forEach(([from, to, , end], i) => { if ((end ?? to) >= a && to >= lo && from <= b) out.push(`${name}/${key}-${i}`); });
       }
     }
-    if (zmax >= this.index.detailMinz) {
+    if (detail) {
       for (const key of boxHits(this.index.detail, bounds, MAX_DETAIL_FILES)) out.push(`d/${key}`);
     }
+    // Long happenings that only show from zoom 4 (most are minor).
+    if (zmax >= 4 && this.index.longDetail) out.push('long-2');
     if (standing && zoom >= STANDING_ZOOM - 0.5) {
       for (const key of boxHits(this.index.standing, bounds, MAX_DETAIL_FILES)) out.push(`p/${key}`);
     }
@@ -113,16 +130,40 @@ export class Store {
   // low: a prefetch, which must never slow down what's on screen.
   load(path, low = false) {
     if (!this.files.has(path)) {
+      // A file that just failed waits before the next try (it would otherwise
+      // be asked for again on every update).
+      const f = this.failed.get(path);
+      if (f && Date.now() - f[1] < RETRY_MS[Math.min(f[0], RETRY_MS.length) - 1]) {
+        return Promise.reject(new Error(`${path}: waiting to retry`));
+      }
       const standing = path.startsWith('p/');
       const p = this.fetchRaw(path, true, low ? 'low' : 'auto').then(rows => {
-        const recs = rows.map(a => toRecord(a, standing));
+        const recs = rows.map(a => toRecord(a, standing, path));
         this.files.set(path, recs);
+        this.failed.delete(path);
+        this.onLoad();
         return recs;
-      }).catch(err => { this.files.delete(path); throw err; })
-        .finally(() => this.onLoad());
+      }, err => {
+        this.files.delete(path);
+        this.failed.set(path, [(f?.[0] || 0) + 1, Date.now()]);
+        // Try again once the wait is over, if the view still wants it.
+        setTimeout(() => this.onLoad(), RETRY_MS[Math.min((f?.[0] || 0) + 1, RETRY_MS.length) - 1] + 50);
+        throw err;
+      });
       this.files.set(path, p);
     }
     return Promise.resolve(this.files.get(path));
+  }
+
+  // A record already loaded, in any file.
+  findLoaded(id) {
+    for (const r of this.long) if (r.id === id) return r;
+    for (const r of this.world) if (r.id === id) return r;
+    for (const v of this.files.values()) {
+      if (!Array.isArray(v)) continue;
+      for (const r of v) if (r.id === id) return r;
+    }
+    return null;
   }
 
   ensure(paths) {
@@ -188,29 +229,38 @@ export class Store {
     return this.fetchRaw('hist');
   }
 
-  loadSearch() {
-    if (!this.search) {
-      this.search = this.fetchRaw('search').then(rows => rows.map(a => ({
-        id: a[0], title: a[1], lat: a[2], lng: a[3], start: a[4], end: a[5], cat: a[6], kind: a[7], loc: a[8],
+  // Search index rows: [id, title, start, end, cat, kind, file, date label],
+  // most notable first, in two parts. loadSearch() resolves with the whole
+  // index; loadSearchFirst() with the first part, which arrives much sooner.
+  loadSearchFirst() {
+    if (!this.searchFirst) {
+      const rows = r => r.map(a => ({
+        id: a[0], title: a[1], start: a[2], end: a[3], cat: a[4], kind: a[5], loc: a[6], label: a[7] || '',
         norm: normalize(a[1]),
-      })));
+      }));
+      this.searchFirst = this.fetchRaw('search').then(rows);
+      this.search = this.index.searchParts > 1
+        ? Promise.all([this.searchFirst, this.fetchRaw('search-2', true, 'low').then(rows)]).then(([a, b]) => a.concat(b))
+        : this.searchFirst;
+      // A failure lets the next search try again.
+      this.search.catch(() => { this.search = this.searchFirst = null; });
     }
+    return this.searchFirst;
+  }
+
+  loadSearch() {
+    this.loadSearchFirst();
     return this.search;
   }
 
-  // Find a record by id in the file the search index says holds it.
+  // Find a record by id in the file that holds it (from the search index or
+  // a shared link).
   async findRecord(entry) {
     if (entry.loc === 'long') { await this.longReady; return this.long.find(r => r.id === entry.id) || null; }
     if (entry.loc === 'world') { await this.worldReady; return this.world.find(r => r.id === entry.id) || null; }
+    if (!/^([abcdp]\/[\w-]+|long-2)$/.test(entry.loc || '')) return null;
     const recs = await this.load(entry.loc).catch(() => null);
     return recs?.find(r => r.id === entry.id) || null;
-  }
-
-  // Standing record for a place, from the leaves around a point.
-  async findStanding(id, lng, lat) {
-    const keys = boxHits(this.index.standing, [lng, lat, lng, lat], 4);
-    const recs = (await Promise.all(keys.map(k => this.load(`p/${k}`).catch(() => [])))).flat();
-    return recs.find(r => r.id === id) || null;
   }
 }
 
@@ -219,8 +269,11 @@ export function displayZoom(zoom) {
   return Math.floor(zoom) + 1;
 }
 
+// Lowercase, accents off, and letters that aren't accented forms folded too
+// ("Łódź" matches "lodz").
+const FOLD = { ł: 'l', ø: 'o', æ: 'ae', œ: 'oe', ß: 'ss', đ: 'd', ð: 'd', þ: 'th', ı: 'i', ħ: 'h' };
 export function normalize(s) {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[łøæœßđðþıħ]/g, c => FOLD[c]);
 }
 
 function idle(fn) {

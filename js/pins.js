@@ -7,7 +7,9 @@ import { el, shortTitle, subline, thumbUrl, catColor } from './util.js';
 import { KIND, HAPPENED } from './config.js';
 
 const CELL = 48;
-const failed = new Set(); // images that couldn't be loaded this session
+const failed = new Map(); // image -> when it failed to load; retried after a while (429s pass)
+const RETRY_PHOTO_MS = 120000;
+const failedRecently = img => Date.now() - (failed.get(img) || 0) < RETRY_PHOTO_MS;
 const measureCtx = document.createElement('canvas').getContext('2d');
 const widthCache = new Map();
 
@@ -87,7 +89,7 @@ export class Pins {
       if (globe && tr.isLocationOccluded && tr.isLocationOccluded(ll)) return;
       const p = map.project(ll);
       if (p.x < -10 || p.y < -10 || p.x > W + 10 || p.y > H + 10) return;
-      const photo = !!r.img && !failed.has(r.img);
+      const photo = !!r.img && !failedRecently(r.img);
       const rad = photo ? photoR : 7;
       const title = shortTitle(r.title);
       const tw = Math.min(170, Math.max(textWidth(title, `600 12.5px ${UI_FONT}`), textWidth(subline(r), `500 11px ${UI_FONT}`)));
@@ -104,7 +106,8 @@ export class Pins {
         box = left; side = 'left';
       }
       add(box);
-      placed.push({ r, photo, small: photo && small, side });
+      // The label's box relative to the pin, for the basemap's label collisions.
+      placed.push({ r, photo, small: photo && small, side, w: box[2] - box[0], h: box[3] - box[1], off: rad + m });
     };
 
     // Panels floating over the map act as already-placed boxes.
@@ -126,7 +129,47 @@ export class Pins {
       if (isMinor && placed.length > n) minor++;
     }
     this.render(placed);
+    this.block(placed);
     return placed.length;
+  }
+
+  // Basemap and border labels give way to pin labels: each placed pin gets an
+  // invisible box in a symbol layer on top, which MapLibre's label collision
+  // then keeps clear. Call after every style load.
+  attach() {
+    const map = this.map;
+    if (!map.getSource('pin-blockers')) map.addSource('pin-blockers', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    if (!map.getLayer('pin-blockers')) {
+      map.addLayer({
+        id: 'pin-blockers', type: 'symbol', source: 'pin-blockers',
+        layout: {
+          'icon-image': ['get', 'img'], 'icon-anchor': ['get', 'anchor'], 'icon-offset': ['get', 'off'],
+          'icon-allow-overlap': true, 'icon-ignore-placement': false, 'icon-padding': 0,
+          'icon-rotation-alignment': 'viewport', 'icon-pitch-alignment': 'viewport',
+        },
+        paint: { 'icon-opacity': 0 },
+      });
+    }
+    this.block(this.lastPlaced || []);
+  }
+
+  block(placed) {
+    this.lastPlaced = placed;
+    const map = this.map, src = map.getSource('pin-blockers');
+    if (!src) return;
+    src.setData({
+      type: 'FeatureCollection',
+      features: placed.map(({ r, side, w, h, off }) => {
+        const W = Math.ceil(w / 10) * 10, H = Math.ceil(h / 2) * 2;
+        const img = `pin-blocker-${W}x${H}`;
+        if (!map.hasImage(img)) map.addImage(img, { width: W, height: H, data: new Uint8Array(W * H * 4) });
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [r.lng, r.lat] },
+          properties: { img, anchor: side === 'left' ? 'right' : 'left', off: [side === 'left' ? off : -off, 0] },
+        };
+      }),
+    });
   }
 
   render(placed) {
@@ -163,6 +206,11 @@ export class Pins {
     node.addEventListener('mouseenter', () => this.onHover(r, node));
     node.addEventListener('mouseleave', () => this.onLeave(r));
     node.addEventListener('click', e => { e.stopPropagation(); this.onClick(r); });
+    node.tabIndex = 0;
+    node.setAttribute('role', 'button');
+    node.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.onClick(r); }
+    });
     const marker = new maplibregl.Marker({ element: node, anchor: 'center', opacityWhenCovered: '0' })
       .setLngLat([r.lng, r.lat])
       .addTo(this.map);
@@ -174,11 +222,11 @@ export class Pins {
   loadPhoto(r, node) {
     const face = node.querySelector('.pin-photo');
     const toDot = () => {
-      failed.add(r.img);
+      failed.set(r.img, Date.now());
       face.className = 'pin-dot';
       node.classList.remove('photo', 'small');
     };
-    if (failed.has(r.img)) return toDot();
+    if (failedRecently(r.img)) return toDot();
     const img = new Image();
     img.onload = () => {
       face.style.backgroundImage = `url("${img.src}")`;

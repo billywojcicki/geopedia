@@ -24,7 +24,9 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 await page.goto(`${site}#y=1815&w=5&m=49.2,10.5,4.15&a=48314`, { waitUntil: 'load' });
 await page.waitForTimeout(6000);
-await page.evaluate(() => document.querySelector('#opt-borders').click());
+// Historical borders are on by default in 1815. The attribution stays in the
+// app; the card has no room for its button.
+await page.addStyleTag({ content: '.maplibregl-ctrl-attrib { display: none !important; }' });
 await page.mouse.move(5, 625); // no hover card
 await page.waitForTimeout(9000);
 await page.screenshot({ path: path.join(root, 'og.jpg'), type: 'jpeg', quality: 86 });
@@ -32,7 +34,7 @@ await ctx.close();
 
 // Icons from icons/icon.svg.
 const icon = await browser.newPage();
-for (const [size, name] of [[180, 'apple-touch-icon.png'], [192, 'icon-192.png'], [512, 'icon-512.png']]) {
+for (const [size, name] of [[32, 'favicon-32.png'], [48, 'favicon-48.png'], [180, 'apple-touch-icon.png'], [192, 'icon-192.png'], [512, 'icon-512.png']]) {
   await icon.setViewportSize({ width: size, height: size });
   await icon.goto(`${site}icons/icon.svg`);
   await icon.screenshot({ path: path.join(root, 'icons', name) });

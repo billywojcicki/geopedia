@@ -31,7 +31,16 @@ export class Sheet {
       const i = this.states.indexOf(this.state);
       this.snap(this.states[(i + 1) % this.states.length]);
     });
-    const relayout = () => { this.measure(); this.apply(); };
+    // The screen changed size (rotation, a browser toolbar, the keyboard): jump
+    // to the new position with the timeline instead of sliding behind it, and
+    // let the map re-pad.
+    const relayout = () => {
+      this.measure();
+      this.el.classList.add('dragging');
+      this.apply();
+      requestAnimationFrame(() => this.el.classList.remove('dragging'));
+      if (this.active) this.onChange(this.state);
+    };
     addEventListener('resize', relayout);
     // Its height follows 100dvh, which can change without a resize event.
     new ResizeObserver(() => { if (this.active && this.el.offsetHeight !== this.full) relayout(); }).observe(el);

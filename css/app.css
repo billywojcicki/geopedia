@@ -77,8 +77,11 @@ body {
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 input, select { font: inherit; color: inherit; }
 a { color: var(--link); text-decoration: none; }
-a:hover { text-decoration: underline; }
+@media (hover: hover) { a:hover { text-decoration: underline; } }
 [hidden] { display: none !important; }
+/* Pinching over the panels must not zoom the page (Android ignores iOS's
+   gesture events); the map handles its own pinch. */
+#sidebar, #timeline, .controls, .popover, .brand-pill, .toast { touch-action: pan-x pan-y; }
 
 #map {
   position: fixed; inset: 0;
@@ -89,8 +92,9 @@ a:hover { text-decoration: underline; }
 }
 .maplibregl-ctrl-attrib { font-size: 10px; background: var(--glass) !important; border-radius: 8px 0 0 0; }
 .maplibregl-ctrl-attrib a { color: var(--text-2) !important; }
-.maplibregl-ctrl-bottom-right { bottom: 132px; }
-@media (max-width: 860px) { .maplibregl-ctrl-bottom-right { bottom: auto; top: 110px; } }
+/* #map: more specific than maplibre-gl.css, which loads later. */
+#map .maplibregl-ctrl-bottom-right { bottom: 132px; }
+@media (max-width: 860px) { #map .maplibregl-ctrl-bottom-right { bottom: auto; top: 110px; } }
 
 .glass {
   background: var(--glass);
@@ -106,7 +110,7 @@ a:hover { text-decoration: underline; }
   color: var(--text-2);
   transition: background .15s, color .15s, transform .1s;
 }
-.icon-btn:hover { background: var(--fill); color: var(--text); }
+@media (hover: hover) { .icon-btn:hover { background: var(--fill); color: var(--text); } }
 .icon-btn:active { transform: scale(.94); }
 
 /* ---------- Sidebar ---------- */
@@ -159,11 +163,12 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px; border-radius: 9px; cursor: pointer;
 }
-.results li[aria-selected="true"], .results li:hover { background: var(--fill); }
+.results li[aria-selected="true"] { background: var(--fill); }
+@media (hover: hover) { .results li:hover { background: var(--fill); } }
 .results .r-title { font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results .r-meta { color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .results .empty { color: var(--text-2); cursor: default; }
-.results .empty:hover { background: none; }
+@media (hover: hover) { .results .empty:hover { background: none; } }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--c); }
 
@@ -177,7 +182,7 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
   transition: background .15s, opacity .15s;
   user-select: none;
 }
-.chip:hover { background: var(--fill-2); }
+@media (hover: hover) { .chip:hover { background: var(--fill-2); } }
 .chip[aria-pressed="false"] { opacity: .45; }
 .chip[aria-pressed="false"] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
 
@@ -198,7 +203,7 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
   color: var(--text); font-size: 12.5px; font-weight: 500;
   transition: background .15s;
 }
-.world-chip:hover { background: color-mix(in srgb, var(--c) 20%, transparent); }
+@media (hover: hover) { .world-chip:hover { background: color-mix(in srgb, var(--c) 20%, transparent); } }
 .world-chip .globe { display: flex; color: var(--c); flex: none; }
 .world-chip span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list { list-style: none; margin: 0; padding: 4px 8px 16px; }
@@ -207,7 +212,8 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
   padding: 8px 12px; border-radius: 12px; cursor: pointer;
   transition: background .12s;
 }
-.list li:hover, .list li.hl { background: var(--fill); }
+.list li.hl { background: var(--fill); }
+@media (hover: hover) { .list li:hover { background: var(--fill); } }
 .thumb {
   width: 48px; height: 48px; flex: none;
   border-radius: 10px; object-fit: cover;
@@ -232,13 +238,13 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .article-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 0; }
 .bar-actions { display: flex; align-items: center; gap: 6px; }
 .close-btn { width: 30px; height: 30px; background: var(--fill); color: var(--text-2); }
-.close-btn:hover { background: var(--fill-2); }
+@media (hover: hover) { .close-btn:hover { background: var(--fill-2); } }
 .back {
   display: inline-flex; align-items: center; gap: 2px;
   padding: 6px 10px 6px 4px;
   border-radius: 10px; color: var(--accent); font-weight: 500;
 }
-.back:hover { background: var(--fill); }
+@media (hover: hover) { .back:hover { background: var(--fill); } }
 .article { padding: 6px 20px 28px; }
 .hero {
   margin: 6px -4px 14px; border-radius: 14px; overflow: hidden;
@@ -247,7 +253,7 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .hero.portrait { background-position: center 22%; }
 .hero img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity .3s; }
 .hero img.loaded { opacity: 1; }
-.hero.portrait { aspect-ratio: 4 / 4.2; }
+.hero.portrait { aspect-ratio: 4 / 4.2; max-height: 38vh; }
 .hero.portrait img { object-position: center 22%; }
 .badge {
   display: inline-flex; align-items: center; gap: 6px;
@@ -269,12 +275,12 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
   font-size: 13px; font-weight: 500;
   background: var(--fill); color: var(--text);
 }
-.btn:hover { background: var(--fill-2); text-decoration: none; }
+@media (hover: hover) { .btn:hover { background: var(--fill-2); text-decoration: none; } }
 .btn.primary { background: var(--accent); color: #fff; }
-.btn.primary:hover { filter: brightness(1.08); }
+@media (hover: hover) { .btn.primary:hover { filter: brightness(1.08); } }
 .prose { font: 15px/1.6 var(--serif); margin-top: 14px; }
 .link-btn { color: var(--link); font: inherit; padding: 0; }
-.link-btn:hover { text-decoration: underline; }
+@media (hover: hover) { .link-btn:hover { text-decoration: underline; } }
 .prose p { margin: 0 0 0.8em; }
 .prose h2, .prose h3, .prose h4 { font-family: var(--serif); font-weight: 400; margin: 1.2em 0 0.4em; border-bottom: 1px solid var(--hairline); padding-bottom: 4px; }
 .prose h2 { font-size: 22px; }
@@ -295,7 +301,7 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .section-title { font: 600 15px/1.3 var(--font-display); margin: 26px 0 6px; }
 .nearby { list-style: none; margin: 0 -12px; padding: 0; }
 .nearby li { display: flex; gap: 10px; align-items: center; padding: 7px 12px; border-radius: 10px; cursor: pointer; }
-.nearby li:hover { background: var(--fill); }
+@media (hover: hover) { .nearby li:hover { background: var(--fill); } }
 .nearby .thumb { width: 38px; height: 38px; border-radius: 8px; }
 .credit { margin-top: 22px; color: var(--text-3); font-size: 11.5px; }
 .credit a { color: var(--text-2); }
@@ -314,11 +320,11 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .ctl-group { border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
 .ctl { width: 40px; height: 40px; display: grid; place-items: center; color: var(--text); transition: background .15s; }
 .ctl + .ctl { border-top: 0.5px solid var(--hairline); }
-.ctl:hover { background: var(--fill); }
+@media (hover: hover) { .ctl:hover { background: var(--fill); } }
 .popover { border-radius: 14px; padding: 8px; }
 .layers { width: 240px; }
 .toggle { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: 9px; cursor: pointer; font-weight: 500; }
-.toggle:hover { background: var(--fill); }
+@media (hover: hover) { .toggle:hover { background: var(--fill); } }
 .toggle span { flex: 1; }
 .toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .toggle i { width: 38px; height: 23px; border-radius: 12px; background: var(--fill-2); position: relative; transition: background .2s; flex: none; }
@@ -341,7 +347,7 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 }
 body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 .tl-row { display: flex; align-items: center; gap: 10px; }
-.play { width: 38px; height: 38px; background: var(--fill); color: var(--text); }
+.play { width: 38px; height: 38px; flex: none; background: var(--fill); color: var(--text); }
 .play .i-pause { display: none; }
 .playing .play .i-play { display: none; }
 .playing .play .i-pause { display: block; }
@@ -353,7 +359,7 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   font-variant-numeric: tabular-nums;
   transition: background .15s;
 }
-.year-input:hover { background: var(--fill); }
+@media (hover: hover) { .year-input:hover { background: var(--fill); } }
 .year-input:focus { background: var(--fill); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .tl-range { color: var(--text-2); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tl-range b { color: var(--text); font-weight: 500; }
@@ -372,7 +378,8 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   height: 30px; padding: 0 12px 0 10px; border-radius: 15px;
   background: var(--fill); font-size: 12.5px; font-weight: 500;
 }
-.pill-btn:hover, .pill-btn[aria-expanded="true"] { background: var(--fill-2); }
+.pill-btn[aria-expanded="true"] { background: var(--fill-2); }
+@media (hover: hover) { .pill-btn:hover { background: var(--fill-2); } }
 
 .track { position: relative; height: 62px; margin-top: 4px; cursor: pointer; outline: none; touch-action: none; }
 .track canvas { position: absolute; left: 0; top: 0; width: 100%; height: 40px; }
@@ -400,6 +407,9 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 }
 .ticks span::before { content: ""; position: absolute; left: 50%; top: -5px; width: 1px; height: 3px; background: var(--text-3); opacity: .6; }
 
+/* Nested inside #timeline, whose own backdrop blur means this one gets none:
+   an opaque background instead. */
+.journeys.glass { background: var(--glass-strong); }
 .journeys {
   position: absolute; right: 10px; bottom: calc(100% + 10px);
   width: min(560px, calc(100vw - 32px));
@@ -407,8 +417,9 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   padding: 10px;
 }
 .journeys button { text-align: left; padding: 9px 12px; border-radius: 10px; }
-.journeys button:hover { background: var(--fill); }
+@media (hover: hover) { .journeys button:hover { background: var(--fill); } }
 .journeys b { display: block; font-weight: 600; font-size: 13.5px; }
+@media (max-width: 1200px) { .ticks .minor { display: none; } }
 .journeys small { color: var(--text-2); font-size: 12px; }
 
 /* ---------- Pins (DOM markers) ---------- */
@@ -460,10 +471,12 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 .pin.standing .pin-photo { filter: saturate(.85); }
 .pin.standing .pin-photo::after { background: var(--c-standing); }
 .pin.standing .pin-label b { font-weight: 500; color: var(--text-2); }
-.pin:hover .pin-dot, .pin:hover .pin-photo, .pin.hl .pin-dot, .pin.hl .pin-photo { transform: scale(1.15); }
+.pin.hl .pin-dot, .pin.hl .pin-photo { transform: scale(1.15); }
+@media (hover: hover) { .pin:hover .pin-dot, .pin:hover .pin-photo { transform: scale(1.15); } }
 .pin.selected { z-index: 2; }
 .pin.selected .pin-photo, .pin.selected .pin-dot { box-shadow: 0 0 0 3px var(--c), var(--shadow-sm); }
-.pin.hl, .pin:hover { z-index: 3; }
+.pin.hl { z-index: 3; }
+@media (hover: hover) { .pin:hover { z-index: 3; } }
 
 .pulse {
   position: absolute; left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 50%;
@@ -548,7 +561,9 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 
   /* Reading: the article gets the whole sheet. */
   body.reading .search-row, body.reading .filters { display: none; }
-  .article-bar { position: sticky; top: 0; z-index: 2; padding: 4px 8px 6px; background: var(--glass-strong); }
+  .article-bar { position: sticky; top: 0; z-index: 2; padding: 4px 8px 6px; background: var(--bg); }
+  /* At peek only the search row shows; the chips would peek out under the home indicator. */
+  body.sheet-peek .filters { visibility: hidden; }
   /* Title first, so a half-open sheet shows what it is before the photo. */
   .article { padding: 4px 18px 24px; display: flex; flex-direction: column; }
   .article > * { order: 2; }
@@ -608,6 +623,11 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   .ticks .minor { display: none; }
   body.reading .search-row, body.reading .filters { display: none; }
   .hero { aspect-ratio: 2 / 1; }
+  .journeys { max-height: calc(100dvh - 140px); overflow-y: auto; }
+  /* Notch and Dynamic Island sit at the sides in landscape. */
+  #sidebar { left: calc(var(--gap) + env(safe-area-inset-left, 0px)); }
+  #timeline { left: calc(var(--sidebar-w) + 2 * var(--gap) + env(safe-area-inset-left, 0px)); right: calc(var(--gap) + env(safe-area-inset-right, 0px)); }
+  .controls { right: calc(var(--gap) + env(safe-area-inset-right, 0px)); }
 }
 
 /* Touch: bigger targets, no zoom buttons (pinch instead), no hover cards. */
@@ -617,7 +637,18 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   .pin-dot::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; }
   .pin-label { pointer-events: auto; }
   .chip { height: 34px; padding: 0 13px 0 11px; }
+  .world-chip { height: 32px; }
+  .results li { min-height: 44px; }
+  /* iOS zooms into any field under 16px when it gets focus. */
+  .search input, .span-select select { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Keyboard focus on list rows and pins. */
+.list li:focus-visible, .nearby li:focus-visible, .world-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pin:focus-visible { outline: none; z-index: 3; }
+.pin:focus-visible .pin-dot, .pin:focus-visible .pin-photo { box-shadow: 0 0 0 3px var(--accent); }
+
+.noscript { position: fixed; z-index: 100; inset: auto 16px 16px; margin: 0; padding: 14px 16px; border-radius: 12px; background: var(--glass-strong); box-shadow: var(--shadow); font-size: 15px; }
