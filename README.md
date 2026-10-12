@@ -6,7 +6,7 @@ A map of history. Scroll around the world, drag the timeline, and see the Wikipe
 - **Zoomed in** on a city you get the local stuff: every battle, riot, treaty, building and birth that Wikipedia knows about there, plus the places that already existed at that point in time.
 - **The timeline** picks a year and a window around it (auto-sized by era, or pick your own). The map tints toward parchment and fades modern roads as you go back.
 - **Click anything** to read the Wikipedia summary in the side panel, or the full article inline.
-- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders (on by default before 1992), shareable links (Share button on every article), play button, light/dark mode.
+- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders (on by default before 1992), a night sky behind the globe (stars, the Milky Way, shooting stars; it swings the other way as the globe turns, like the view from a spacecraft), shareable links (Share button on every article), play button, light/dark mode.
 - **On phones** the panel is a bottom sheet (peek, half, full) you drag by its top. Tapping a pin opens the article at half height with the pin centred in the map above it; tapping the map or swiping down puts it away.
 
 ## Run it
@@ -70,6 +70,8 @@ Built for the X / Twitter in-app browser as much as for Safari and Chrome:
 ## Performance
 
 Still a plain static site. The speed comes from never downloading or drawing what the current view can't show.
+
+**The night sky** (`js/space.js`) is two canvases behind the map: the stars and Milky Way are redrawn only when the camera moves (about 1 ms), shooting stars and twinkling repaint just their own few pixels at about 12 frames a second, and all of it stops once the globe fills the screen, in a background tab, or with reduced motion. To drop it, remove the `new Space(...)` line in `js/app.js`.
 
 **Level-of-detail data.** The build gives every happening a `minzoom`: the first map zoom at which it's among the 8 most notable things in its 512px map tile and time slice (a year after 1500, longer slices before). Records are then grouped into tiers, like map tiles but with time:
 

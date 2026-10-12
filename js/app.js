@@ -12,6 +12,7 @@ import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
 import { Borders } from './borders.js';
 import { applyOldNames, loadOldNames } from './oldnames.js';
+import { Space } from './space.js';
 import { Sheet } from './sheet.js';
 import { rankSearch } from './search.js';
 
@@ -25,7 +26,7 @@ const state = {
   borders: null, // null: automatic (on before AUTO_BORDERS_BEFORE); true/false: the user's choice
   selected: null,
 };
-let map, pins, timeline, borders, sheet;
+let map, pins, timeline, borders, sheet, space;
 let candidates = []; // current window, sorted by priority
 let candById = new Map();
 let theme = themeName();
@@ -83,11 +84,12 @@ async function init() {
     pixelRatio: Math.min(devicePixelRatio || 1, 2),
   });
   map.touchZoomRotate.disableRotation();
+  space = new Space(map, { home: DEFAULT_VIEW.center });
   // Start with attribution folded into its (i) button.
   map.once('idle', () => document.querySelector('.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show'));
   pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: toggle });
   borders = new Borders(map);
-  window.geopedia = { map, store, state, setYear, get candidates() { return candidates; } }; // for devtools
+  window.geopedia = { map, store, state, setYear, space, get candidates() { return candidates; } }; // for devtools
 
   map.on('style.load', onStyleLoad);
   map.once('load', onStyleLoad);
@@ -913,6 +915,7 @@ function bindChrome() {
   $('#opt-globe').addEventListener('change', e => {
     state.globe = e.target.checked;
     map?.setProjection({ type: state.globe ? 'globe' : 'mercator' });
+    space?.schedule();
   });
   $('#opt-borders').addEventListener('change', e => {
     state.borders = e.target.checked;
