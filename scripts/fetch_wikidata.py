@@ -185,13 +185,39 @@ SELECT DISTINCT ?item ?cls WHERE {{
 }}""",
 }
 
+# Items with no "instance of" (Counties of Sweden, a banknote): what they are
+# a subclass of, for the build to judge them by.
+QUERIES["noclass"] = f"""
+SELECT DISTINCT ?item ?cls WHERE {{
+  {ENWIKI}
+  {CANDIDATE}
+  FILTER NOT EXISTS {{ ?item wdt:P31 [] }}
+  ?item wdt:P279 ?cls .
+}}"""
+
 # Subclass (P279) edges above every class our items use, so the build can
-# find each class's *nearest* category root instead of any ancestor.
+# find each class's *nearest* category root instead of any ancestor. A class
+# with no superclass of its own is followed through what it is an instance
+# of (an edition's class is often its series: Survivor Series, a recurring
+# sporting event).
+_used = f"""{{ {ENWIKI} {CANDIDATE} ?item wdt:P31 ?cls . }}
+    UNION {{ {ENWIKI} {CANDIDATE} FILTER NOT EXISTS {{ ?item wdt:P31 [] }} ?item wdt:P279 ?cls . }}"""
 QUERIES["subclass"] = f"""
 SELECT DISTINCT ?a ?b WHERE {{
-  {{ SELECT DISTINCT ?cls WHERE {{ {ENWIKI} {CANDIDATE} ?item wdt:P31 ?cls . }} }}
-  ?cls wdt:P279* ?a .
+  {{ SELECT DISTINCT ?c WHERE {{
+    {{ SELECT DISTINCT ?cls WHERE {{ {_used} }} }}
+    {{ BIND(?cls AS ?c) }} UNION {{ ?cls wdt:P31 ?c . FILTER NOT EXISTS {{ ?cls wdt:P279 [] }} }}
+  }} }}
+  ?c wdt:P279* ?a .
   ?a wdt:P279 ?b .
+}}"""
+# The edges from such classes to what they are instances of (read with the
+# subclass edges by the build).
+QUERIES["seriesof"] = f"""
+SELECT DISTINCT ?a ?b WHERE {{
+  {{ SELECT DISTINCT ?a WHERE {{ {_used.replace("?cls", "?a")} }} }}
+  FILTER NOT EXISTS {{ ?a wdt:P279 [] }}
+  ?a wdt:P31 ?b .
 }}"""
 
 for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249"]:
@@ -227,6 +253,9 @@ SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) {PACKED_DATE}
 OWN_SITE = """ UNION {
     ?item wdt:P625 ?co . BIND(1 AS ?site)
     FILTER NOT EXISTS { ?item wdt:P189 ?_p . ?_p wdt:P625 [] }
+    # Not a country, continent, ocean, sea, bay, current or region at its centre
+    # point (the Gulf Stream "discovered" off Cape Hatteras).
+    FILTER NOT EXISTS { ?item wdt:P31 ?_b VALUES ?_b { wd:Q6256 wd:Q3624078 wd:Q5107 wd:Q9430 wd:Q165 wd:Q4022 wd:Q129558 wd:Q39594 wd:Q82794 wd:Q34763 } }
   }"""
 
 # Works first performed at a known venue (operas, ballets, plays, symphonies),

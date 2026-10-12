@@ -36,7 +36,7 @@ import urllib.parse
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(__file__))
-from categories import CATEGORIES, EVENT_ROLES, KEEP_EVENTS, NOT_EVENTS, PLACE_ROLES, ROLE_PRIORITY, ROOTS  # noqa: E402
+from categories import CATEGORIES, DROP_ITEMS, EVENT_ROLES, KEEP_EVENTS, NOT_EVENTS, PLACE_ROLES, ROLE_PRIORITY, ROOTS  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 RAW = os.path.join(ROOT, "build", "raw")
@@ -101,13 +101,13 @@ WEIGHT = {
 # description when the wording is unambiguous ("Battle of...", "... mine disaster").
 GUESS_CAT = [
     ("conflict", re.compile(r"\b(battle|siege|action of|raid|massacre|war|rebellion|uprising|revolt|invasion|"
-                            r"bombing|attack|skirmish|insurgency|mutiny|ambush|offensive|campaign against|"
-                            r"naval engagement|sack of|capture of|liberation of|occupation of|pogrom|"
-                            r"shooting|assassination|terrorist|clash|clashes|coup|riot|riots|fighting|incursion)\b", re.I)),
-    ("disaster", re.compile(r"\b(disaster|earthquake|flood|fire|explosion|hurricane|typhoon|cyclone|tornado|"
+                            r"bombings?|(?<!shark )attacks?|skirmish|insurgency|mutiny|ambush|offensive|campaign against|"
+                            r"naval engagement|sack of|capture of|liberation of|occupation of|pogroms?|massacres|"
+                            r"shootings?|assassination|terrorist|clash|clashes|coup|riot|riots|fighting|incursion)\b", re.I)),
+    ("disaster", re.compile(r"\b(disasters?|earthquakes?|floods?|fires?|explosions?|hurricane|typhoon|cyclone|tornado(es)?|"
                             r"eruption|tsunami|famine|epidemic|pandemic|outbreak|plague|crash|derailment|"
                             r"shipwreck|sinking|collapse|landslide|avalanche|blizzard|heat wave|drought|"
-                            r"accident|stampede|wreck|meteor|wildfires?|bushfires?|heatwave|blackout)\b"
+                            r"accident|stampede|wreck|meteor|wildfires?|bushfires?|heatwave|blackout|shark attacks?)\b"
                             r"|\bFlight \d+\b", re.I)),
     # Editions of contests and shows: held to the sports bar (very notable only).
     ("sports", re.compile(r"\b(championships?|grand prix|draft|tournament|cup|bowl|regatta|marathon|derby|"
@@ -151,10 +151,20 @@ WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
 THING_WEIGHT = 0.3  # found, premiered or launched things that aren't moments
 LAUNCH_MIN_SITELINKS = 18  # probes, landers and firsts (Pioneer 5, IM-1, Mercury-Redstone 2)
 ROUTINE_LAUNCH_MIN_SITELINKS = 25  # crew rotations and shuttle flights: the famous ones only
+ROUTINE_WEIGHT = 0.35  # those kept count for less, so a hundred shuttle flights don't crowd the world view
+FAMOUS_FLIGHTS = {"STS-1", "STS-7", "STS-31", "STS-61", "STS-88", "STS-135", "Soyuz 1", "Soyuz 11", "Soyuz 19", "SpaceX Crew-1"}
 ROUTINE_CREWED = re.compile(r"^(Soyuz (\d+|T-\d+|TM-\d+|TMA-\d+M?|MS-\d+)|STS-\d+|SpaceX Crew-\d+|Shenzhou 1\d|Axiom Mission [2-9])$")
 WRECK_MIN_SITELINKS = 20  # the Lusitania and the Bismarck, not every U-boat
 SPORTS_MIN_SITELINKS = 60  # Olympics, World Cups and continental cups; not every league season
 EDITION_ROOTS = {"Q27020041", "Q27968055"}  # sports season, recurring event edition
+# A year in the title marks a yearly edition too (2014 Tour de France, Super Bowl XL).
+EDITION_TITLE = re.compile(r"^(\d{4}(–\d{2,4})? |Super Bowl [LXVI\d]+\b)")
+# Overview and follow-up articles, not events: "History of ...", "Aftermath of ...", "X–Y relations".
+NOT_EVENT_TITLE = re.compile(r"^(History of|Timeline of|Aftermath of|Humanitarian response to|International reactions to|Reactions to) "
+                             r"|–.+ relations$")
+# Cancelled events didn't happen (cancelled plans and operations are history, though).
+CANCELLED = re.compile(r"\bcancell?ed\b", re.I)
+CANCELLED_KEEP = re.compile(r"\b(plan|operation|invasion)\b", re.I)
 MATCH_MIN_SITELINKS = 20  # one-off matches and fights (the Miracle on Ice, the Rumble in the Jungle)
 # Minimum sitelinks by the root an event's class reached.
 ROOT_MIN_SITELINKS = {
@@ -168,6 +178,7 @@ ROOT_MIN_SITELINKS = {
 }
 # Crashes and wrecks: a start point is the departure airport or port, not the place.
 TRANSPORT_ROOTS = {"Q744913", "Q1078765", "Q3002150", "Q852190"}
+FALLBACK_DEPTH = 3  # how far up a class-only item's superclasses still say what it is
 BOUNDED_YEARS = 30  # an event dated only by inception and dissolution lasts at most this long
 # Treaties, laws and the like: their end date is a repeal, not part of the event.
 DOCUMENT_ROOTS = {"Q131569", "Q820655", "Q7748", "Q1156854", "Q546113", "Q3771738", "Q93288"}
@@ -175,7 +186,7 @@ DOCUMENT_ROOTS = {"Q131569", "Q820655", "Q7748", "Q1156854", "Q546113", "Q377173
 PERSONAL = re.compile(r"^(Murder|Killing|Death|Disappearance|Kidnapping|Abduction|Shooting|Stabbing) (of|and) ", re.I)
 PERSONAL_MIN_SITELINKS = 20
 # Parts of a bigger event that has its own pin or chip.
-SUB_EVENT = re.compile(r" at the \d{4} (Summer|Winter|Youth) (Olympics|Paralympics)$| in the Eurovision Song Contest( \d{4})?$"
+SUB_EVENT = re.compile(r" at the \d{4} (Summer|Winter|Youth) (Olympics|Paralympics)( – .+)?$| in the Eurovision Song Contest( \d{4})?$"
                        r"|\b(opening|closing) ceremony$", re.I)
 MIN_FOUNDING_HAPPENING = 1.5  # roughly 3+ sitelinks for a building, 5+ for a town
 MIN_ESTABLISHED_HAPPENING = 3.0  # institutions, firms etc. need ~7+ sitelinks
@@ -191,8 +202,11 @@ def qid(uri):
     return int(uri.rsplit("/Q", 1)[1])
 
 
-def read(name):
-    with open(os.path.join(RAW, f"{name}.csv"), newline="", encoding="utf-8") as f:
+def read(name, optional=False):
+    path = os.path.join(RAW, f"{name}.csv")
+    if optional and not os.path.exists(path):
+        return  # a query added since the raw data was last fetched
+    with open(path, newline="", encoding="utf-8") as f:
         yield from csv.DictReader(f)
 
 
@@ -479,8 +493,9 @@ def clean_desc(s):
 def main():
     print("resolving classes…")
     parents = defaultdict(set)
-    for r in read("subclass"):
-        parents[r["a"].rsplit("/", 1)[1]].add(r["b"].rsplit("/", 1)[1])
+    for name in ("subclass", "seriesof"):  # seriesof: classes with no superclass, by what they are
+        for r in read(name, optional=True):
+            parents[r["a"].rsplit("/", 1)[1]].add(r["b"].rsplit("/", 1)[1])
     role_of_root = {}
     for role in ROLE_PRIORITY:
         for q in ROOTS[role]:
@@ -521,10 +536,11 @@ def main():
     print("loading items…")
     items = {}
     for r in read("items"):
-        if r["title"].startswith("List of") or NAMESPACED.match(r["title"]):
+        if r["title"].startswith("List of") or NAMESPACED.match(r["title"]) or NOT_EVENT_TITLE.search(r["title"]):
             continue
         i = qid(r["item"])
-        items[i] = {"title": r["title"], "sl": int(r["sl"] or 0)}
+        if f"Q{i}" not in DROP_ITEMS:
+            items[i] = {"title": r["title"], "sl": int(r["sl"] or 0)}
 
     for r in read("meta"):
         it = items.get(qid(r["item"]))
@@ -545,6 +561,22 @@ def main():
                 best_excl[i] = excl
             if weak is not None:
                 weak_excl.add(i)
+
+    # Items with no "instance of" are kinds of thing (Counties of Sweden, the
+    # US hundred-dollar bill): judged by what they are a subclass of, near
+    # matches only (the Flight and expulsion of Germans is a deportation, an
+    # organization only eight steps up).
+    fallback = defaultdict(list)
+    for r in read("noclass", optional=True):
+        i = qid(r["item"])
+        c = r["cls"].rsplit("/", 1)[1]
+        if i in items and i not in item_classes:
+            fallback[i].append(c)
+            keep, excl, weak = class_role(c)
+            if keep and keep[0] <= FALLBACK_DEPTH and (i not in best_keep or keep < best_keep[i]):
+                best_keep[i] = keep
+            if excl is not None and excl <= FALLBACK_DEPTH and excl < best_excl.get(i, 99):
+                best_excl[i] = excl
 
     # National elections are known only by country and would crowd the
     # capitals of the recent past: they don't get the country fallback.
@@ -588,6 +620,10 @@ def main():
         open-access publisher)."""
         keep, excl = best_keep.get(i), best_excl.get(i)
         if i in vehicles:
+            return "exclude"
+        # A modern country, whatever else it also is (Israel is also a "region").
+        direct = item_classes.get(i, ())
+        if ("Q6256" in direct or "Q3624078" in direct) and "Q3024240" not in direct:
             return "exclude"
         if keep is None and i in weak_excl:
             return "exclude"
@@ -805,7 +841,8 @@ def main():
                 cat = KEEP_EVENTS.get(f"Q{i}") or guess_cat(it["title"])
                 if cat:
                     stats[f"guessed:{cat}"] += 1
-                elif any(not_event(c) for c in item_classes.get(i, ())):
+                elif any(not_event(c) for c in item_classes.get(i, ())) \
+                        or any(c in NOT_EVENTS or any(descends(c, e, FALLBACK_DEPTH) for e in NOT_EVENTS) for c in fallback.get(i, ())):
                     # Dated, but a thing (Tequila, a car model, a language
                     # family) rather than something that happened.
                     stats["not_an_event"] += 1
@@ -819,6 +856,10 @@ def main():
             if sl < bar or SUB_EVENT.search(it["title"]):
                 stats["below_bar"] += 1
                 drop(i, it, role, "below the bar for its kind")
+                continue
+            if CANCELLED.search(it.get("desc", "")) and not CANCELLED_KEEP.search(it.get("desc", "") + " " + it["title"]):
+                stats["cancelled"] += 1
+                drop(i, it, role, "cancelled")
                 continue
             if start_d is None and found_d:
                 # Dated only by inception and end (the Rivonia Trial, the
@@ -863,7 +904,8 @@ def main():
                 stats["event_nocoord"] += 1
                 drop(i, it, role, "event: no usable place")
                 continue
-            if cat == "sports" and sl < (SPORTS_MIN_SITELINKS if keep_root(i) in EDITION_ROOTS else MATCH_MIN_SITELINKS):
+            if cat == "sports" and sl < (SPORTS_MIN_SITELINKS if keep_root(i) in EDITION_ROOTS or EDITION_TITLE.match(it["title"])
+                                         else MATCH_MIN_SITELINKS):
                 stats["sports_dropped"] += 1
                 drop(i, it, role, "sports/edition under the bar")
                 continue
@@ -964,6 +1006,8 @@ def main():
             # A fossil genus, an element, a moon or a film is a thing more than a
             # moment: it stays on the map, but well behind the events.
             thing = THING_WEIGHT if r.get("thing") and kind != LAUNCHED else 1  # spacecraft count as "objects"
+            if kind == LAUNCHED and ROUTINE_CREWED.match(r["title"]) and r["title"] not in FAMOUS_FLIGHTS:
+                thing = ROUTINE_WEIGHT
             score = round(sl * WEIGHT[weight] * thing * (IMAGE_BONUS if img else 1), 1)
             i = qid(r["item"])
             if kind in (PREMIERED, DISCOVERED, LAUNCHED, SANK) and not r.get("own"):
