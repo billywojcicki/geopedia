@@ -20,6 +20,12 @@ export function el(tag, attrs = {}, ...children) {
   return e;
 }
 
+// Like node.replaceChildren, but skips null/false (the DOM method would print
+// them as the text "null").
+export function setChildren(node, ...kids) {
+  node.replaceChildren(...kids.flat().filter(k => k != null && k !== false));
+}
+
 export function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
 // --- Years ------------------------------------------------------------------
@@ -107,28 +113,31 @@ export function thumbUrl(path, width) {
   return `https://upload.wikimedia.org/wikipedia/commons/thumb/${dir}${enc}/${w}px-${enc}${suffix}`;
 }
 
-function originalUrl(path) {
-  const name = path.slice(path.lastIndexOf('/') + 1);
-  const dir = path.slice(0, path.lastIndexOf('/') + 1);
-  return `https://upload.wikimedia.org/wikipedia/commons/${dir}${encodeURIComponent(name)}`;
-}
-
 export function wikiUrl(title) {
   return `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
 }
 
-// <img> for a Commons file. Large sizes fall back to the original file when the
-// thumbnail fails (Wikimedia refuses thumbnails wider than the original); small
-// ones just disappear rather than risk pulling a huge original.
+// Widths Wikimedia will render. PNG thumbnails stay PNG and get heavy (a
+// 960px painting can be ~900 KB), so PNG sources stop at 500.
+const SIZES = [120, 250, 330, 500, 960];
+function maxWidth(path) { return /\.png$/i.test(path) ? 500 : 960; }
+
+// <img> for a Commons file at about `width` CSS px. Given a `sizes` attribute
+// it also gets a srcset, so the browser picks by screen density. If a size fails (the original is
+// smaller, or a hiccup), step down to smaller sizes, never up to the
+// full-size original, which can be many megabytes.
 export function wikiImg(path, width, attrs = {}) {
-  const img = el('img', { src: thumbUrl(path, width), alt: '', loading: 'lazy', decoding: 'async', ...attrs });
+  const cap = maxWidth(path);
+  let sizes = SIZES.filter(w => w >= Math.min(width, cap) && w <= cap);
+  if (!sizes.length) sizes = [cap];
+  const img = el('img', { src: thumbUrl(path, sizes[0]), alt: '', loading: 'lazy', decoding: 'async', ...attrs });
+  if (attrs.sizes && sizes.length > 1) img.srcset = sizes.map(w => `${thumbUrl(path, w)} ${w}w`).join(', ');
+  let fallback = SIZES.filter(w => w < sizes[0]).reverse();
   img.addEventListener('error', () => {
-    if (width >= 330 && !img.dataset.fallback && !/\.svg$/i.test(path)) {
-      img.dataset.fallback = '1';
-      img.src = originalUrl(path);
-    } else {
-      img.remove();
-    }
+    img.removeAttribute('srcset');
+    const w = fallback.shift();
+    if (w >= 120) img.src = thumbUrl(path, w);
+    else img.remove();
   });
   return img;
 }

@@ -2,7 +2,7 @@
 
 import { CATEGORIES, KIND, KIND_VERB, JOURNEYS, DEFAULT_VIEW, STANDING_ZOOM, MIN_YEAR, MAX_YEAR, autoSpan } from './config.js';
 import {
-  $, el, clamp, fmtYear, fmtRange, parseYear, catColor, metaLine,
+  $, el, setChildren, clamp, fmtYear, fmtRange, parseYear, catColor, metaLine,
   thumbUrl, wikiImg, wikiUrl, debounce, throttle, distKm,
 } from './util.js';
 import { Store, normalize, displayZoom } from './data.js';
@@ -11,6 +11,7 @@ import { Timeline } from './timeline.js';
 import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
 import { Borders } from './borders.js';
+import { Sheet } from './sheet.js';
 
 const store = new Store();
 const state = {
@@ -22,7 +23,7 @@ const state = {
   borders: false,
   selected: null,
 };
-let map, pins, timeline, borders;
+let map, pins, timeline, borders, sheet;
 let candidates = []; // current window, sorted by priority
 let theme = themeName();
 
@@ -45,8 +46,10 @@ const libReady = new Promise(res => {
 
 async function init() {
   readHash();
-  // Phones start with the panel tucked away so the map has room.
-  if (innerWidth <= 860) { document.body.classList.add('collapsed'); $('#expand').hidden = false; }
+  sheet = new Sheet($('#sidebar'), { onChange: onSheetChange, onDismiss: closeArticle });
+  onSheetChange(sheet.state);
+  // Stop iOS zooming the whole page on a pinch over the panels.
+  document.addEventListener('gesturestart', e => e.preventDefault());
   const boot = window.__geopediaBoot || {};
   const stylePromise = buildStyle(theme, { globe: state.globe }, boot);
   await store.init(boot.index);
@@ -72,11 +75,13 @@ async function init() {
     pitchWithRotate: false,
     renderWorldCopies: true,
     fadeDuration: 150,
+    // Phones report 3x; 2x looks the same on a map and is far cheaper to draw.
+    pixelRatio: Math.min(devicePixelRatio || 1, 2),
   });
   map.touchZoomRotate.disableRotation();
   // Start with attribution folded into its (i) button.
   map.once('idle', () => document.querySelector('.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show'));
-  pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: r => select(r) });
+  pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: toggle });
   borders = new Borders(map);
   window.geopedia = { map, store, state, setYear, get candidates() { return candidates; } }; // for devtools
 
@@ -87,7 +92,13 @@ async function init() {
   new ResizeObserver(syncPadding).observe($('#timeline'));
   map.on('move', throttle(placePins, 120));
   map.on('moveend', onMoveEnd);
-  map.on('click', () => hideHover());
+  // Clicking empty map deselects; on phones it also puts the sheet away.
+  map.on('click', e => {
+    hideHover();
+    if (map.queryRenderedFeatures(e.point, { layers: ['dots'] }).length) return; // a dot: handled below
+    if (state.selected) closeArticle();
+    else if (sheet.active && sheet.state !== 'peek') sheet.snap('peek');
+  });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async e => {
     theme = e.matches ? 'dark' : 'light';
     styleReady = false;
@@ -110,6 +121,18 @@ function onStyleLoad() {
   updateDots();
   applyAge(map, theme, lastAge = ageFor(state.year));
   borders.restore();
+}
+
+// The phone sheet moved: body classes drive the CSS, then the map padding and
+// pin placement follow the new free area.
+function onSheetChange(s) {
+  const b = document.body.classList;
+  b.remove('sheet-peek', 'sheet-half', 'sheet-full');
+  if (sheet?.active) b.add(`sheet-${s}`);
+  $('#grabber').setAttribute('aria-label', s === 'full' ? 'Collapse panel' : 'Expand panel');
+  syncPadding();
+  clearTimeout(onSheetChange.t);
+  onSheetChange.t = setTimeout(() => { obstacleCache = null; placePins(); }, 450); // after the slide
 }
 
 function registerServiceWorker() {
@@ -272,7 +295,7 @@ function bindDotEvents() {
   map.on('mouseleave', 'dots', () => { map.getCanvas().style.cursor = ''; hideHover(); });
   map.on('click', 'dots', e => {
     const r = candidates[e.features[0].id];
-    if (r) { e.preventDefault(); select(r); }
+    if (r) toggle(r);
   });
 }
 
@@ -394,7 +417,7 @@ function showHover(r, node, point) {
     const people = r.kind === KIND.BORN || r.kind === KIND.DIED;
     card.className = `hovercard${people ? ' people' : ''}`;
     card.style.setProperty('--c', catColor(r.cat));
-    card.replaceChildren(
+    setChildren(card,
       // The 120px thumb (already cached by the pin) shows until the sharp one lands.
       r.img ? el('div', { class: 'hc-img', style: `background-image:url("${thumbUrl(r.img, 330)}"),url("${thumbUrl(r.img, 120)}")` }) : null,
       el('div', { class: 'hc-body' },
@@ -437,14 +460,23 @@ function categoryLabel(r) {
 
 let articleSeq = 0;
 
-function select(r, { fly = false } = {}) {
+// Clicking the open item again closes it.
+function toggle(r) {
+  if (state.selected?.id === r.id) closeArticle();
+  else select(r);
+}
+
+function select(r, { fly = false, zoom = null } = {}) {
   hideHover();
   state.selected = r;
   pins.setSelected(r.id);
   showArticle(r);
+  const z = zoom ?? Math.min(Math.max(map.getZoom(), r.kind === KIND.EVENT ? 7 : 9), 13);
   if (fly) {
-    const z = Math.max(map.getZoom(), r.kind === KIND.EVENT ? 7 : 9);
-    map.flyTo({ center: [r.lng, r.lat], zoom: Math.min(z, 13), duration: 1400, essential: true });
+    map.flyTo({ center: [r.lng, r.lat], zoom: z, duration: 1600, essential: true });
+  } else if (sheet.active) {
+    // The sheet now covers the bottom half: bring the pin into the free part.
+    map.easeTo({ center: [r.lng, r.lat], duration: 500 });
   } else {
     placePins();
   }
@@ -455,6 +487,12 @@ function select(r, { fly = false } = {}) {
 function syncPadding() {
   obstacleCache = null;
   if (!map) return;
+  if (sheet.active) {
+    // Use where the sheet is going, not where it is mid-slide.
+    const tl = sheet.state === 'peek' ? $('#timeline').offsetHeight + 10 : 0;
+    map.setPadding({ top: 0, right: 0, left: 0, bottom: sheet.visible() + tl });
+    return;
+  }
   const collapsed = document.body.classList.contains('collapsed');
   const sb = $('#sidebar').getBoundingClientRect();
   const tl = $('#timeline').getBoundingClientRect();
@@ -472,10 +510,13 @@ function obstacles() {
   if (obstacleCache) return obstacleCache;
   const out = [];
   for (const id of ['sidebar', 'timeline']) {
-    if (id === 'sidebar' && document.body.classList.contains('collapsed')) continue;
+    if (id === 'sidebar' && !sheet.active && document.body.classList.contains('collapsed')) continue;
+    if (id === 'timeline' && sheet.active && sheet.state !== 'peek') continue;
     const r = document.getElementById(id).getBoundingClientRect();
     if (r.width && r.height) out.push([r.left, r.top, r.right, r.bottom]);
   }
+  const pill = $('.brand-pill').getBoundingClientRect();
+  if (pill.width) out.push([pill.left, pill.top, pill.right, pill.bottom]);
   const c = $('.controls').getBoundingClientRect();
   out.push([c.left, c.top, c.right, c.top + 140]);
   return (obstacleCache = out);
@@ -485,6 +526,9 @@ addEventListener('resize', () => { obstacleCache = null; });
 function closeArticle() {
   state.selected = null;
   pins.setSelected(null);
+  document.body.classList.remove('reading');
+  sheet.allow(['peek', 'half', 'full']);
+  if (sheet.active) sheet.snap('peek');
   $('#article-view').hidden = true;
   $('#list-view').hidden = false;
   placePins();
@@ -493,8 +537,14 @@ function closeArticle() {
 
 function showArticle(r) {
   const seq = ++articleSeq;
-  document.body.classList.remove('collapsed');
-  $('#expand').hidden = true;
+  document.body.classList.add('reading');
+  if (sheet.active) {
+    sheet.allow(['half', 'full']);
+    sheet.snap('half');
+  } else {
+    document.body.classList.remove('collapsed');
+    $('#expand').hidden = true;
+  }
   $('#list-view').hidden = true;
   $('#article-view').hidden = false;
   $('#article-view').scrollTop = 0;
@@ -503,7 +553,7 @@ function showArticle(r) {
     ? el('div', { class: `hero${people ? ' portrait' : ''}`, style: `background-image:url("${thumbUrl(r.img, 120)}")` })
     : null;
   if (hero) {
-    const img = wikiImg(r.img, 960, { loading: 'eager' });
+    const img = wikiImg(r.img, 500, { loading: 'eager', sizes: '(max-width: 860px) 92vw, 360px', fetchpriority: 'high' });
     img.addEventListener('load', () => img.classList.add('loaded'));
     img.addEventListener('error', () => { if (!img.isConnected) hero.remove(); });
     hero.append(img);
@@ -512,7 +562,7 @@ function showArticle(r) {
   const readMore = el('button', { class: 'btn' }, 'Continue reading');
   const article = $('#article');
   article.style.setProperty('--c', catColor(r.cat));
-  article.replaceChildren(
+  setChildren(article,
     hero,
     el('div', { class: 'badge' }, el('span', { class: 'dot' }), categoryLabel(r)),
     el('h2', {}, r.title),
@@ -528,15 +578,24 @@ function showArticle(r) {
       ' under CC BY-SA 4.0. ', el('a', { href: `https://www.wikidata.org/wiki/Q${r.id}`, target: '_blank', rel: 'noopener' }, `Wikidata Q${r.id}`), '.'),
   );
 
-  fetchSummary(r.title).then(s => {
+  const loadSummary = () => fetchSummary(r.title).then(s => {
     if (seq !== articleSeq) return;
-    if (s?.extract_html) prose.innerHTML = s.extract_html;
-    else prose.replaceChildren(el('p', {}, r.desc || ''), el('p', { class: 'a-desc' }, 'Summary unavailable right now.'));
-    if (!r.img && s?.thumbnail?.source) {
-      const h = el('div', { class: 'hero' }, el('img', { src: s.thumbnail.source, alt: '', class: 'loaded' }));
-      article.prepend(h);
+    if (s?.extract_html) {
+      prose.innerHTML = s.extract_html;
+    } else {
+      // The description is already shown above; just offer another try.
+      const retry = el('button', { class: 'link-btn' }, 'Try again');
+      retry.addEventListener('click', () => {
+        setChildren(prose, el('div', { class: 'skeleton' }), el('div', { class: 'skeleton short' }));
+        loadSummary();
+      });
+      setChildren(prose, el('p', { class: 'a-desc' }, 'Couldn’t reach Wikipedia for the summary. ', retry));
+    }
+    if (!r.img && s?.thumbnail?.source && !article.querySelector('.hero')) {
+      article.prepend(el('div', { class: 'hero' }, el('img', { src: s.thumbnail.source, alt: '', class: 'loaded' })));
     }
   });
+  loadSummary();
   readMore.addEventListener('click', async () => {
     readMore.disabled = true;
     readMore.textContent = 'Loading…';
@@ -597,11 +656,13 @@ async function search(q) {
   results.hidden = false;
 }
 
+let choosing = false;
 function chooseResult(e) {
+  choosing = true;
   $('#results').hidden = true;
   $('#search').value = '';
   $('#search').blur();
-  openEntry(e, { fly: true });
+  openEntry(e, { fly: true }).finally(() => { choosing = false; });
 }
 
 // Open an item known only by id + basics (search, random, shared link).
@@ -617,16 +678,13 @@ async function openEntry(e, { fly }) {
   const [a, b] = range();
   const inWindow = isPlace ? e.start <= b : e.start <= b && e.end >= a;
   if (!inWindow) setYear(e.start);
-  if (fly) {
-    const z = isPlace ? 13 : e.kind === KIND.EVENT ? 8 : 9;
-    map.flyTo({ center: [e.lng, e.lat], zoom: z, duration: 1800, essential: true });
-  }
   // The search index says which file holds the record: one small fetch.
   let rec = await store.findRecord(e);
   if (!rec && isPlace) rec = await store.findStanding(e.id, e.lng, e.lat);
   if (rec?.standing) rec.isNew = rec.start >= range()[0];
   rec = rec || { ...e, score: 1, img: '', desc: '', date: fmtYear(e.start), place: '', standing: false, minzoom: 0 };
-  select(rec);
+  // Select first, so on phones the sheet is up before the flight aims the pin above it.
+  select(rec, { fly, zoom: isPlace ? 13 : e.kind === KIND.EVENT ? 8 : 9 });
 }
 
 async function randomPick() {
@@ -687,6 +745,8 @@ function bindChrome() {
   $('#zoom-in').addEventListener('click', () => map.zoomIn());
   $('#zoom-out').addEventListener('click', () => map.zoomOut());
   $('#back').addEventListener('click', closeArticle);
+  $('#close').addEventListener('click', closeArticle);
+  $('#share').addEventListener('click', share);
   const setCollapsed = c => {
     document.body.classList.toggle('collapsed', c);
     $('#expand').hidden = !c;
@@ -755,8 +815,19 @@ function bindChrome() {
   const input = $('#search');
   const doSearch = debounce(() => search(input.value), 110);
   input.addEventListener('input', doSearch);
-  input.addEventListener('focus', () => { store.loadSearch(); if (input.value) search(input.value); });
-  input.addEventListener('blur', () => setTimeout(() => { $('#results').hidden = true; }, 120));
+  let before = null; // sheet state to return to after searching (phones)
+  input.addEventListener('focus', () => {
+    store.loadSearch();
+    if (input.value) search(input.value);
+    if (sheet.active && sheet.state !== 'full') { before = sheet.state; sheet.snap('full'); }
+    document.body.classList.add('searching');
+  });
+  input.addEventListener('blur', () => setTimeout(() => {
+    $('#results').hidden = true;
+    document.body.classList.remove('searching');
+    if (before && !choosing && !state.selected && sheet.state === 'full') sheet.snap(before);
+    before = null;
+  }, 120));
   input.addEventListener('keydown', e => {
     const items = [...$('#results').querySelectorAll('li[role=option]')];
     const cur = items.findIndex(li => li.getAttribute('aria-selected') === 'true');
@@ -797,16 +868,40 @@ function readHash() {
   if (state.spanMode !== 'auto') queueMicrotask(syncSpanSelect);
 }
 
-const writeHash = debounce(() => {
-  if (!map) return;
-  const c = map.getCenter();
+function currentHash() {
   const p = new URLSearchParams();
   p.set('y', state.year);
   p.set('w', state.spanMode);
-  p.set('m', `${c.lat.toFixed(4)},${c.lng.toFixed(4)},${map.getZoom().toFixed(2)}`);
+  if (map) {
+    const c = map.getCenter();
+    p.set('m', `${c.lat.toFixed(4)},${c.lng.toFixed(4)},${map.getZoom().toFixed(2)}`);
+  }
   if (state.selected) p.set('a', state.selected.id);
-  history.replaceState(null, '', '#' + p.toString().replace(/%2C/g, ','));
+  return '#' + p.toString().replace(/%2C/g, ',');
+}
+
+const writeHash = debounce(() => {
+  if (map) history.replaceState(null, '', currentHash());
 }, 300);
+
+// Share the open article: the system share sheet where there is one (phones,
+// most in-app browsers), else copy the link.
+async function share() {
+  const r = state.selected;
+  if (!r) return;
+  const url = location.href.split('#')[0] + currentHash();
+  const data = { title: `${r.title} | Geopedia`, text: `${r.title}, ${metaLine(r)}`, url };
+  if (navigator.share) {
+    try { await navigator.share(data); } catch { /* dismissed */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Link copied');
+  } catch {
+    prompt('Copy this link', url);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Toast
