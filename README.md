@@ -23,6 +23,7 @@ To host it, turn on GitHub Pages for the branch (Settings > Pages > Deploy from 
 
 ```
 index.html, css/, js/     the site (vanilla JS modules, MapLibre GL from unpkg)
+sw.js                     service worker (caching, see Performance)
 data/                     generated data the site loads (committed)
 scripts/                  data pipeline (Python 3, stdlib only)
 ```
@@ -30,7 +31,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 | File | What it does |
 | --- | --- |
 | `js/app.js` | State, map layers, sidebar list, article panel, search, URL state |
-| `js/data.js` | Loads time buckets and spatial tiles on demand |
+| `js/data.js` | Works out which data files a view needs and loads them |
 | `js/pins.js` | Greedy screen-space placement of labelled photo pins |
 | `js/timeline.js` | Non-linear year scrubber with a density histogram |
 | `js/basemap.js` | Restyles OpenFreeMap vector tiles, ages the map by year |
@@ -45,6 +46,42 @@ python3 scripts/build_data.py       # ~40 s, writes data/
 ```
 
 `fetch_wikidata.py --force` refetches. Queries go to the [QLever](https://qlever.dev) Wikidata endpoint, which handles the big queries the official one times out on.
+
+## Performance
+
+Still a plain static site. The speed comes from never downloading or drawing what the current view can't show.
+
+**Level-of-detail data.** The build gives every happening a `minzoom`: the first map zoom at which it's among the 8 most notable things in its 512px map tile and time slice (a year after 1500, longer slices before). Records are then grouped into tiers, like map tiles but with time:
+
+| Tier | minzoom | Split by | Loaded when |
+| --- | --- | --- | --- |
+| `a/` | 0-3 | time chunks, whole world | always |
+| `b/` | 4-5 | z2 map tiles x time chunks | zoom >= 3 |
+| `c/` | 6-7 | z4 map tiles x time chunks | zoom >= 5 |
+| `d/` | 8+ | small map areas, every era in one file | zoom >= 7 |
+| `p/` | places that existed | small map areas, every era | zoom >= 8.5 |
+
+So the world view downloads only the world's top items for the window, and a city view downloads only that city (every era of it, so scrubbing the timeline there needs no network at all). The search index records which file holds each item, so opening a search result is one small fetch.
+
+**Startup.** `index.html` starts fetching the data index and map style before any script runs, all JS modules are preloaded in parallel, and the app module runs before MapLibre (the biggest download) arrives, so the first view's data is already in flight. Pins and the sidebar list go up as soon as the data lands, without waiting for basemap tiles.
+
+**Caching.** Data URLs carry a build hash (`?v=...`), so `sw.js` serves them cache-first forever and drops old versions. Map tiles, fonts and the pinned MapLibre build are cached too. Neighbouring time chunks are prefetched, and on a good connection all world-level chunks load in the background so scrubbing the timeline zoomed out is instant.
+
+**Main thread.** Timeline scrubbing and data arrivals are coalesced into at most one update per animation frame, and an update with nothing new skips the work. Pin placement measures text once and caches panel geometry.
+
+**Images and reading.** Pins, list thumbnails and card placeholders share one 120px thumbnail URL, so it's downloaded once and shown instantly (blurry) while the sharper card or hero image loads. Hovering a pin or list row prefetches its Wikipedia summary, so clicking usually opens instantly.
+
+Measured with a headless browser and a local server that gzips like GitHub Pages (software rendering, so absolute times are pessimistic):
+
+| | Before | After |
+| --- | --- | --- |
+| Time to first pins | 7.1 s | 1.2 s (1.6 s on throttled 4G) |
+| Data downloaded for the first view | 1.3 MB | 0.25 MB |
+| Data for scrubbing 1700 to 2000, zoomed out | 10.6 MB | ~2 MB (0 once prefetched) |
+| Main-thread JS per timeline step | up to 120 ms | ~1-3 ms |
+| Repeat visit, first pins | same as first | ~1.0 s, data from the service worker |
+
+Ideas not done yet: a binary record format (JSON parsing isn't a bottleneck yet), precomputed Wikipedia extracts for the most-opened articles, and self-hosting a trimmed basemap.
 
 ## How the content is chosen
 
@@ -78,11 +115,19 @@ Full Wikipedia text is tens of GB, so the static part is an index (title, place,
 
 On the map, places that merely existed rank at a third of their score, and long events (wars, eras) are discounted by their length so the specific beats the general.
 
-**Zoom.** Pins are placed greedily in priority order and skipped if they'd overlap one already placed, so the most notable things win at world scale and local ones appear as you zoom in. Small dots show everything else in the window.
+**Zoom.** Pins are placed greedily in priority order and skipped if they'd overlap one already placed, so the most notable things win at world scale and local ones appear as you zoom in. Small dots show the rest of what is loaded for that zoom and window.
 
 **Time window.** Default half-width by era: ±2 years after 1900, ±5 after 1700, ±10 after 1500, ±20 after 1000, ±40 after AD 1, wider before that.
 
 **Known gaps.** Things Wikidata lacks a date or coordinates for are missing (about 14k events are only located to a country). Sitelinks favour globally famous things over locally important ones, and Western topics over others. Births use the birthplace's city coordinates, so people stack on city centres. Pre-1500 coverage is thin.
+
+## Open questions
+
+Parked for later, to decide once we've used it more:
+
+1. Should People be off by default? It's the noisiest category (births mostly surface people famous decades later).
+2. More or fewer founding pins (towns, buildings) relative to events?
+3. Should older eras get more attention, e.g. a different time window, more Journeys, or a lower bar for inclusion before 1500?
 
 ## Credits
 

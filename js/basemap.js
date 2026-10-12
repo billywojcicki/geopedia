@@ -45,8 +45,9 @@ export function themeName() {
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-export async function buildStyle(theme, { globe = true } = {}) {
-  const style = await (await fetch(STYLE_URL)).json();
+// prefetched: the style JSON promise index.html started early (used once).
+export async function buildStyle(theme, { globe = true } = {}, prefetched = null) {
+  const style = structuredClone(await (prefetched || fetch(STYLE_URL).then(r => r.json())));
   const P = PALETTES[theme];
   const paint = (id, props) => {
     const l = style.layers.find(x => x.id === id);
@@ -100,6 +101,8 @@ export async function buildStyle(theme, { globe = true } = {}) {
   }
 
   // Natural Earth shaded relief under everything, fading out as you zoom in.
+  // 512px tiles: a quarter of the requests, and relief is soft anyway.
+  style.sources.ne2_shaded = { ...style.sources.ne2_shaded, tileSize: 512 };
   const bgIndex = style.layers.findIndex(l => l.id === 'background');
   style.layers.splice(bgIndex + 1, 0, {
     id: 'relief', type: 'raster', source: 'ne2_shaded', maxzoom: 8,

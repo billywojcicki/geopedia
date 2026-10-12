@@ -7,7 +7,10 @@ const articles = new Map();
 export function fetchSummary(title) {
   if (!summaries.has(title)) {
     const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, '_'))}`;
-    summaries.set(title, fetch(url).then(r => (r.ok ? r.json() : null)).catch(() => null));
+    summaries.set(title, fetch(url).then(r => (r.ok ? r.json() : null)).catch(() => null).then(v => {
+      if (!v) summaries.delete(title); // don't remember failures (e.g. a flaky prefetch)
+      return v;
+    }));
   }
   return summaries.get(title);
 }

@@ -5,7 +5,7 @@ import {
   $, el, clamp, fmtYear, fmtRange, parseYear, catColor, metaLine,
   thumbUrl, wikiImg, wikiUrl, debounce, throttle, distKm,
 } from './util.js';
-import { Store, normalize } from './data.js';
+import { Store, normalize, displayZoom } from './data.js';
 import { buildStyle, applyAge, ageFor, themeName } from './basemap.js';
 import { Timeline } from './timeline.js';
 import { Pins } from './pins.js';
@@ -24,7 +24,6 @@ const state = {
 };
 let map, pins, timeline, borders;
 let candidates = []; // current window, sorted by priority
-let tileKeys = [];
 let theme = themeName();
 
 const span = () => (state.spanMode === 'auto' ? autoSpan(state.year) : state.spanMode);
@@ -32,25 +31,38 @@ const range = () => [state.year - span(), state.year + span()];
 
 // ---------------------------------------------------------------------------
 // Boot
+//
+// Startup is a race to first pins. index.html starts fetching the data index
+// and the map style before any module loads; this module runs before MapLibre
+// has finished downloading, so the first view's data is already on its way by
+// the time the map exists. Pins go up as soon as data and map are both there,
+// without waiting for basemap tiles.
+
+const libReady = new Promise(res => {
+  if (window.maplibregl) return res();
+  document.getElementById('maplibre-js').addEventListener('load', res, { once: true });
+});
 
 async function init() {
   readHash();
   // Phones start with the panel tucked away so the map has room.
   if (innerWidth <= 860) { document.body.classList.add('collapsed'); $('#expand').hidden = false; }
-  toast('Loading history…', true);
-  await store.init();
+  const boot = window.__geopediaBoot || {};
+  const stylePromise = buildStyle(theme, { globe: state.globe }, boot.style);
+  await store.init(boot.index);
+  store.onLoad = scheduleUpdate;
 
-  timeline = new Timeline({
-    hist: store.index.hist,
-    onInput: (y, dragging) => setYear(y, { dragging }),
-  });
+  timeline = new Timeline({ onInput: (y, dragging) => setYear(y, { dragging }) });
+  store.loadHist().then(h => timeline.setHist(h), () => {});
   buildFilters();
   buildJourneys();
   bindChrome();
+  setYear(state.year); // requests the first view's data
 
+  await libReady;
   map = new maplibregl.Map({
     container: 'map',
-    style: await buildStyle(theme, { globe: state.globe }),
+    style: await stylePromise,
     center: state.center || DEFAULT_VIEW.center,
     zoom: state.zoom ?? DEFAULT_VIEW.zoom,
     attributionControl: { compact: true, customAttribution: 'Data: <a href="https://www.wikidata.org" target="_blank">Wikidata</a> &amp; <a href="https://en.wikipedia.org" target="_blank">Wikipedia</a> (CC BY-SA)' },
@@ -58,17 +70,18 @@ async function init() {
     dragRotate: false,
     pitchWithRotate: false,
     renderWorldCopies: true,
+    fadeDuration: 150,
   });
   map.touchZoomRotate.disableRotation();
   // Start with attribution folded into its (i) button.
   map.once('idle', () => document.querySelector('.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show'));
   pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: r => select(r) });
   borders = new Borders(map);
+  window.geopedia = { map, store, state, setYear, get candidates() { return candidates; } }; // for devtools
 
-  await new Promise(res => map.once('load', res));
-  styleReady = true;
-  window.geopedia = { map, store, state, get candidates() { return candidates; } }; // for devtools
-  addLayers();
+  map.on('style.load', onStyleLoad);
+  map.once('load', onStyleLoad);
+  bindDotEvents();
   syncPadding();
   new ResizeObserver(syncPadding).observe($('#timeline'));
   map.on('move', throttle(placePins, 120));
@@ -78,18 +91,29 @@ async function init() {
     theme = e.matches ? 'dark' : 'light';
     styleReady = false;
     map.setStyle(await buildStyle(theme, { globe: state.globe }));
-    map.once('styledata', () => {
-      styleReady = true;
-      addLayers();
-      updateDots();
-      applyAge(map, theme, lastAge = ageFor(state.year));
-      borders.restore();
-    });
   });
 
-  setYear(state.year, { initial: true });
-  loadStandingTiles();
+  refresh(); // data may already be in: place pins and dots on the new map
   if (state.pendingSelect) openEntry({ id: state.pendingSelect }, { fly: false });
+  map.once('idle', () => {
+    store.prefetchWorld();
+    registerServiceWorker();
+  });
+}
+
+// Runs for the first style and again after a theme switch replaces it.
+function onStyleLoad() {
+  if (map.getLayer('dots')) return;
+  styleReady = true;
+  addLayers();
+  updateDots();
+  applyAge(map, theme, lastAge = ageFor(state.year));
+  borders.restore();
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+  navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -97,9 +121,8 @@ async function init() {
 
 let lastAge = -1;
 let styleReady = false;
-let loadSeq = 0;
 
-function setYear(y, { dragging = false, initial = false } = {}) {
+function setYear(y, { dragging = false } = {}) {
   state.year = clamp(Math.round(y), MIN_YEAR, MAX_YEAR);
   const [a, b] = range();
   timeline.set(state.year, [a, b]);
@@ -110,28 +133,78 @@ function setYear(y, { dragging = false, initial = false } = {}) {
   const age = Math.round(ageFor(state.year) * 50) / 50;
   if (age !== lastAge && styleReady) { lastAge = age; applyAge(map, theme, age); }
   if (state.borders) borders.setYear(state.year, dragging);
-
-  const seq = ++loadSeq;
-  if (store.hasWindow(a, b)) {
-    recompute();
-    if (!dragging) store.prefetchAround(a, b);
-  } else {
-    if (!initial) toast('Loading…', true);
-    store.loadWindow(a, b).then(() => {
-      if (seq !== loadSeq) return;
-      hideToast();
-      recompute();
-      store.prefetchAround(a, b);
-    }).catch(err => toast(`Couldn't load data (${err.message})`));
-    if (!initial) recompute(); // show whatever is already loaded meanwhile
-  }
-  if (initial) store.loadWindow(a, b).then(hideToast, () => {});
+  // Prefetch only once the map is up, so it never competes with the first view.
+  if (!dragging && map) store.prefetchAround(currentView());
+  scheduleUpdate();
   writeHash();
 }
 
 function sizeYearInput() {
   const i = $('#year-input');
   i.style.width = `${Math.max(4, i.value.length) * 0.62 + 0.4}em`;
+}
+
+// ---------------------------------------------------------------------------
+// Updates: at most one per animation frame, however fast the timeline is
+// scrubbed or data arrives.
+
+let updateQueued = false;
+let lastSig = '';
+
+function scheduleUpdate() {
+  if (updateQueued) return;
+  updateQueued = true;
+  requestAnimationFrame(() => { updateQueued = false; update(); });
+}
+
+// Force a full recompute on the next frame (filters or options changed).
+function refresh() {
+  lastSig = '';
+  scheduleUpdate();
+}
+
+function update() {
+  const view = currentView();
+  const files = store.filesFor(view);
+  store.ensure(files); // each file that arrives schedules another update
+  setLoading(store.pending > 0);
+  const loaded = files.filter(f => store.get(f));
+  const sig = [view.a, view.b, displayZoom(view.zoom), [...state.cats].join(''), store.long.length, loaded.join()].join('|');
+  if (sig !== lastSig) {
+    lastSig = sig;
+    recompute(view, loaded);
+  }
+}
+
+function currentView() {
+  const [a, b] = range();
+  return { bounds: viewBounds(), zoom: map ? map.getZoom() : state.zoom ?? DEFAULT_VIEW.zoom, a, b, standing: state.standing };
+}
+
+// [w, s, e, n] of the visible map plus a margin, so panning finds data waiting.
+function viewBounds() {
+  const bb = map ? map.getBounds() : estimatedBounds();
+  const [w, s, e, n] = [bb.getWest(), bb.getSouth(), bb.getEast(), bb.getNorth()];
+  const px = (e - w) * 0.15, py = (n - s) * 0.15;
+  return [w - px, Math.max(-90, s - py), e + px, Math.min(90, n + py)];
+}
+
+// Before the map exists: the view estimated from centre and zoom (Web
+// Mercator), shaped like the LngLatBounds the map would return.
+function estimatedBounds() {
+  const [lng, lat] = state.center || DEFAULT_VIEW.center;
+  const degPerPx = 360 / (512 * 2 ** (state.zoom ?? DEFAULT_VIEW.zoom));
+  const dx = (innerWidth / 2) * degPerPx, dy = (innerHeight / 2) * degPerPx * Math.cos((lat * Math.PI) / 180);
+  const b = [lng - dx, Math.max(-85, lat - dy), lng + dx, Math.min(85, lat + dy)];
+  return { getWest: () => b[0], getSouth: () => b[1], getEast: () => b[2], getNorth: () => b[3] };
+}
+
+let loadingTimer = null;
+function setLoading(on) {
+  clearTimeout(loadingTimer);
+  if (!on) { $('#timeline').classList.remove('loading'); return; }
+  // Only show the spinner if loading takes long enough to notice.
+  loadingTimer = setTimeout(() => $('#timeline').classList.toggle('loading', store.pending > 0), 250);
 }
 
 // ---------------------------------------------------------------------------
@@ -145,25 +218,16 @@ function priority(r) {
   return len > 10 ? r.score / Math.sqrt(1 + len / 40) : r.score;
 }
 
-function recompute() {
-  if (!map) return;
-  const [a, b] = range();
+function recompute(view, files) {
   const out = [];
   const seen = new Set();
-  for (const r of store.happenings(a, b)) {
+  // Happenings come before standing places, so they win duplicate ids.
+  for (const r of store.records(files, view.a, view.b, view.zoom)) {
     if (!state.cats.has(r.cat) || seen.has(r.id)) continue;
     seen.add(r.id);
+    r.prio = priority(r);
     out.push(r);
   }
-  if (state.standing && map.getZoom() >= STANDING_ZOOM - 0.5) {
-    for (const r of store.standing(a, b, tileKeys)) {
-      if (!state.cats.has(r.cat) || seen.has(r.id)) continue;
-      seen.add(r.id);
-      r.isNew = r.start >= a;
-      out.push(r);
-    }
-  }
-  for (const r of out) r.prio = priority(r);
   out.sort((x, y) => y.prio - x.prio);
   candidates = out;
   updateDots();
@@ -194,9 +258,12 @@ function addLayers() {
       'circle-pitch-alignment': 'map',
     },
   });
+}
+
+// Layer-scoped handlers survive style swaps, so bind them once.
+function bindDotEvents() {
   map.on('mousemove', 'dots', e => {
-    const f = e.features[0];
-    const r = candidates[f.id];
+    const r = candidates[e.features[0].id];
     if (!r) return;
     map.getCanvas().style.cursor = 'pointer';
     showHover(r, null, e.point);
@@ -234,26 +301,7 @@ function onMoveEnd() {
   placePins();
   updateList();
   writeHash();
-  loadStandingTiles();
-}
-
-// Load the spatial tiles of places that existed, once zoomed in far enough.
-function loadStandingTiles() {
-  if (!state.standing || map.getZoom() < STANDING_ZOOM - 0.5) {
-    if (tileKeys.length) { tileKeys = []; recompute(); }
-    return;
-  }
-  const b = map.getBounds();
-  const pad = 0.15;
-  const dw = (b.getEast() - b.getWest()) * pad, dh = (b.getNorth() - b.getSouth()) * pad;
-  const keys = store.tileKeys([b.getWest() - dw, b.getSouth() - dh, b.getEast() + dw, b.getNorth() + dh]).slice(0, 24);
-  const changed = keys.length !== tileKeys.length || keys.some((k, i) => k !== tileKeys[i]);
-  tileKeys = keys;
-  const missing = keys.filter(k => !Array.isArray(store.tiles.get(k)));
-  if (missing.length) {
-    Promise.all(missing.map(k => store.loadTile(k))).then(() => { if (tileKeys === keys) recompute(); }, () => {});
-  }
-  if (changed) recompute();
+  scheduleUpdate(); // the view may need different files or a different level of detail
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +310,7 @@ function loadStandingTiles() {
 const updateList = debounce(renderList, 120);
 
 function inView(r, b, globe) {
-  if (globe && map.getZoom() < 2.5) {
+  if (globe && map && map.getZoom() < 2.5) {
     return !(map.transform.isLocationOccluded && map.transform.isLocationOccluded({ lng: r.lng, lat: r.lat }));
   }
   if (r.lat < b.getSouth() || r.lat > b.getNorth()) return false;
@@ -274,13 +322,14 @@ function inView(r, b, globe) {
 }
 
 function renderList() {
-  if (!map) return;
   const [a, b] = range();
-  const bounds = map.getBounds();
-  const globe = map.getProjection()?.type === 'globe';
+  // Before the map exists the list still fills in, from the estimated view.
+  const bounds = map ? map.getBounds() : estimatedBounds();
+  const globe = map ? map.getProjection()?.type === 'globe' : state.globe;
   const visible = candidates.filter(r => inView(r, bounds, globe));
   $('#list-title').textContent = span() === 0 ? fmtYear(state.year) : fmtRange(a, b);
-  const zoomHint = map.getZoom() < STANDING_ZOOM - 0.5 && state.standing ? ' · zoom in for more' : '';
+  const zoom = map ? map.getZoom() : state.zoom ?? DEFAULT_VIEW.zoom;
+  const zoomHint = zoom < STANDING_ZOOM - 0.5 && state.standing ? ' · zoom in for more' : '';
   $('#list-sub').textContent = `${visible.length.toLocaleString()} ${visible.length === 1 ? 'article' : 'articles'} in view${zoomHint}`;
   const list = $('#list');
   if (!visible.length) {
@@ -306,7 +355,7 @@ function listItem(r) {
     ),
   );
   li.addEventListener('click', () => select(r, { fly: true }));
-  li.addEventListener('mouseenter', () => { pins.setHighlight(r.id); pulse(r); });
+  li.addEventListener('mouseenter', () => { pins.setHighlight(r.id); pulse(r); fetchSummary(r.title); });
   li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
   return li;
 }
@@ -345,7 +394,8 @@ function showHover(r, node, point) {
     card.className = `hovercard${people ? ' people' : ''}`;
     card.style.setProperty('--c', catColor(r.cat));
     card.replaceChildren(
-      r.img ? el('div', { class: 'hc-img', style: `background-image:url("${thumbUrl(r.img, 330)}")` }) : null,
+      // The 120px thumb (already cached by the pin) shows until the sharp one lands.
+      r.img ? el('div', { class: 'hc-img', style: `background-image:url("${thumbUrl(r.img, 330)}"),url("${thumbUrl(r.img, 120)}")` }) : null,
       el('div', { class: 'hc-body' },
         el('div', { class: 'badge' }, el('span', { class: 'dot' }), categoryLabel(r)),
         el('div', { class: 'hc-title' }, r.title),
@@ -355,6 +405,7 @@ function showHover(r, node, point) {
       ),
     );
     card.hidden = false;
+    fetchSummary(r.title); // a hover usually comes before a click: have the text ready
     let x, y;
     if (node) {
       const rect = node.getBoundingClientRect();
@@ -401,6 +452,7 @@ function select(r, { fly = false } = {}) {
 
 // Keep the map's visual centre in the part not covered by the panels.
 function syncPadding() {
+  obstacleCache = null;
   if (!map) return;
   const collapsed = document.body.classList.contains('collapsed');
   const sb = $('#sidebar').getBoundingClientRect();
@@ -412,8 +464,11 @@ function syncPadding() {
   map.setPadding({ top: 0, right: 0, left, bottom: Math.max(0, innerHeight - bottomEdge) });
 }
 
-// Screen rects that pins must not sit under.
+// Screen rects that pins must not sit under. Measuring forces layout, so the
+// result is cached until the window or the panels change size.
+let obstacleCache = null;
 function obstacles() {
+  if (obstacleCache) return obstacleCache;
   const out = [];
   for (const id of ['sidebar', 'timeline']) {
     if (id === 'sidebar' && document.body.classList.contains('collapsed')) continue;
@@ -422,8 +477,9 @@ function obstacles() {
   }
   const c = $('.controls').getBoundingClientRect();
   out.push([c.left, c.top, c.right, c.top + 140]);
-  return out;
+  return (obstacleCache = out);
 }
+addEventListener('resize', () => { obstacleCache = null; });
 
 function closeArticle() {
   state.selected = null;
@@ -442,7 +498,9 @@ function showArticle(r) {
   $('#article-view').hidden = false;
   $('#article-view').scrollTop = 0;
   const people = r.kind === KIND.BORN || r.kind === KIND.DIED;
-  const hero = r.img ? el('div', { class: `hero${people ? ' portrait' : ''}` }) : null;
+  const hero = r.img
+    ? el('div', { class: `hero${people ? ' portrait' : ''}`, style: `background-image:url("${thumbUrl(r.img, 120)}")` })
+    : null;
   if (hero) {
     const img = wikiImg(r.img, 960, { loading: 'eager' });
     img.addEventListener('load', () => img.classList.add('loaded'));
@@ -562,16 +620,11 @@ async function openEntry(e, { fly }) {
     const z = isPlace ? 13 : e.kind === KIND.EVENT ? 8 : 9;
     map.flyTo({ center: [e.lng, e.lat], zoom: z, duration: 1800, essential: true });
   }
-  const [a2, b2] = range();
-  await store.loadWindow(a2, b2);
-  let rec = store.happenings(a2, b2).find(r => r.id === e.id);
-  if (!rec) {
-    const keys = store.tileKeys([e.lng, e.lat, e.lng, e.lat]);
-    const recs = (await Promise.all(keys.map(k => store.loadTile(k)))).flat();
-    rec = recs.find(r => r.id === e.id);
-    if (rec) rec.isNew = rec.start >= a2;
-  }
-  rec = rec || { ...e, score: 1, img: '', desc: '', date: fmtYear(e.start), place: '', standing: false };
+  // The search index says which file holds the record: one small fetch.
+  let rec = await store.findRecord(e);
+  if (!rec && isPlace) rec = await store.findStanding(e.id, e.lng, e.lat);
+  if (rec?.standing) rec.isNew = rec.start >= range()[0];
+  rec = rec || { ...e, score: 1, img: '', desc: '', date: fmtYear(e.start), place: '', standing: false, minzoom: 0 };
   select(rec);
 }
 
@@ -623,7 +676,7 @@ function buildFilters() {
       if (e.altKey) state.cats = new Set([i]);
       else if (state.cats.has(i)) state.cats.delete(i); else state.cats.add(i);
       [...$('#filters').children].forEach((x, j) => x.setAttribute('aria-pressed', String(state.cats.has(j))));
-      recompute();
+      refresh();
     });
     return b;
   }));
@@ -655,7 +708,7 @@ function bindChrome() {
     if (!e.target.closest('#journeys')) toggleJourneys(false);
   });
 
-  $('#opt-standing').addEventListener('change', e => { state.standing = e.target.checked; loadStandingTiles(); recompute(); });
+  $('#opt-standing').addEventListener('change', e => { state.standing = e.target.checked; refresh(); });
   $('#opt-globe').addEventListener('change', e => {
     state.globe = e.target.checked;
     map.setProjection({ type: state.globe ? 'globe' : 'mercator' });
@@ -758,12 +811,12 @@ const writeHash = debounce(() => {
 // Toast
 
 let toastTimer = null;
-function toast(msg, spinner = false) {
+function toast(msg) {
   const t = $('#toast');
-  t.replaceChildren(spinner ? el('span', { class: 'spinner' }) : null, msg);
+  t.textContent = msg;
   t.hidden = false;
   clearTimeout(toastTimer);
-  if (!spinner) toastTimer = setTimeout(hideToast, 4000);
+  toastTimer = setTimeout(hideToast, 4000);
 }
 function hideToast() { $('#toast').hidden = true; }
 

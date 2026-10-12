@@ -6,8 +6,8 @@ import { TICKS, MIN_YEAR, MAX_YEAR } from './config.js';
 const MINOR_TICKS = [-1000, 500, 1700, 1950]; // hidden on narrow screens
 
 export class Timeline {
-  constructor({ hist, onInput }) {
-    this.hist = hist; // { min, max, counts[] }
+  constructor({ onInput }) {
+    this.hist = null; // { min, max, counts[] }, arrives after first paint
     this.onInput = onInput;
     this.track = $('#track');
     this.canvas = $('#hist');
@@ -70,6 +70,11 @@ export class Timeline {
     }));
   }
 
+  setHist(hist) {
+    this.hist = hist;
+    this.draw();
+  }
+
   set(year, range) {
     this.year = year;
     this.range = range;
@@ -85,7 +90,7 @@ export class Timeline {
   draw() {
     const c = this.canvas, dpr = devicePixelRatio || 1;
     const w = c.clientWidth, h = c.clientHeight;
-    if (!w) return;
+    if (!w || !this.hist) return;
     c.width = Math.round(w * dpr);
     c.height = Math.round(h * dpr);
     const ctx = c.getContext('2d');
