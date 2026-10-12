@@ -181,7 +181,9 @@ TRANSPORT_ROOTS = {"Q744913", "Q1078765", "Q3002150", "Q852190"}
 FALLBACK_DEPTH = 3  # how far up a class-only item's superclasses still say what it is
 BOUNDED_YEARS = 30  # an event dated only by inception and dissolution lasts at most this long
 # Treaties, laws and the like: their end date is a repeal, not part of the event.
-DOCUMENT_ROOTS = {"Q131569", "Q820655", "Q7748", "Q1156854", "Q546113", "Q3771738", "Q93288"}
+DOCUMENT_ROOTS = {"Q131569", "Q820655", "Q7748", "Q3771738", "Q93288"}  # (not policies: the New Deal had years)
+LEGAL_ROOTS = {"Q2334719", "Q8016240", "Q16738832"}  # legal case, trial, criminal case
+PUBLISHED_MIN_SITELINKS = 20  # laws and court cases dated only by publication (Roe v. Wade, not every constitution)
 # Individual deaths and crimes: famous cases only (not assassinations).
 PERSONAL = re.compile(r"^(Murder|Killing|Death|Disappearance|Kidnapping|Abduction|Shooting|Stabbing) (of|and) ", re.I)
 PERSONAL_MIN_SITELINKS = 20
@@ -256,6 +258,14 @@ def name_of_time(label, year, names, pt):
                     part = "East Germany" if inside(pt, names[None]) else "West Germany"
         parts.append(part)
     return ", ".join(parts)
+
+
+def load_vital():
+    """QIDs of events on Wikipedia's lists of vital articles (scripts/vital.csv):
+    iconic by Wikipedia's own reckoning, so they skip the notability bars and
+    get their own share of the world view."""
+    with open(os.path.join(os.path.dirname(__file__), "vital.csv"), newline="", encoding="utf-8") as f:
+        return {int(r["qid"][1:]) for r in csv.DictReader(f)}
 
 
 def overrides():
@@ -658,12 +668,14 @@ def main():
         valid = [c for c in cs if (c[2] is None or c[2] <= year) and (c[3] is None or year <= c[3])]
         if valid:
             # The one in office then (a dated term beats an open-ended one).
-            return max(valid, key=lambda c: (c[2] is not None and c[3] is not None, c[0], c[2] or -99999))[1]
+            # On a tie, the one that lasted longer (the Qing's Beijing, not Shenyang).
+            return max(valid, key=lambda c: (c[2] is not None and c[3] is not None, c[0], c[2] or -99999,
+                                             c[3] if c[3] is not None else 99999))[1]
         return max(cs, key=lambda c: (c[0], c[3] is None))[1]
 
     # Locations from P276. Vague ones (countries, states, continents, oceans,
     # seas, regions, or anything over VAGUE_AREA) aren't pinned on directly.
-    locs = defaultdict(dict)  # item -> location -> [point, vague, huge, has capital, label, start point]
+    locs = defaultdict(dict)  # item -> location -> [point, vague, huge, has capital, label, start point, sitelinks]
     for r in read("loccoords"):
         i = qid(r["item"])
         pt = parse_point(r["c"])
@@ -674,7 +686,8 @@ def main():
             area = float(r["area"] or 0)
         except ValueError:
             area = 0
-        cur = locs[i].setdefault(r["loc"], [pt, False, False, False, r["label"] or "", bool(r.get("start"))])
+        cur = locs[i].setdefault(r["loc"], [pt, False, False, False, r["label"] or "", bool(r.get("start")),
+                                            int(float(r.get("lsl") or 0))])
         # A capital marks a region, unless the place is city-sized (Beijing
         # and Tokyo have one: their seat of government).
         cur[1] = cur[1] or bool(big) or area > VAGUE_AREA or bool(r["cap"]) and not area
@@ -717,7 +730,8 @@ def main():
             return coords[i], "", None
         ls = {loc: v for loc, v in locs.get(i, {}).items() if starts or not v[5]}
         if ls:
-            vals = list(ls.items())
+            # Best-known first, not whichever place Wikidata happens to list first.
+            vals = sorted(ls.items(), key=lambda kv: -kv[1][6])
             specific = [v[0] for _, v in vals if not v[1]]
             regions = sum(v[2] for _, v in vals)
             if specific and spread(specific) <= LOCAL_KM and regions < 2:
@@ -765,8 +779,8 @@ def main():
         return "Worldwide" if spread(pts) > WORLD_KM else ""
 
     dates = defaultdict(lambda: defaultdict(list))  # item -> property -> [(rank, date)]
-    for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249"]:
-        for r in read(f"date_{prop}"):
+    for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249", "P577"]:
+        for r in read(f"date_{prop}", optional=prop == "P577"):
             i = qid(r["item"])
             rk = rank_of(r["rk"])
             if i in items and rk:
@@ -781,6 +795,7 @@ def main():
         if it["sl"] >= DROPPED_MIN_SITELINKS:
             dropped.append((it["sl"], f"Q{i}", it["title"], role or "", reason))
 
+    vital = load_vital()
     print("classifying…")
     happenings = []
     worldwide_recs = []  # no single place: listed and searchable, never pinned
@@ -789,6 +804,9 @@ def main():
 
     for i, it in items.items():
         role = item_role(i)
+        if role == "exclude" and i in vital:  # World War II in Yugoslavia is a vital article, not a sub-article
+            k = best_keep.get(i)
+            role = k[2] if k else None
         if role == "exclude":
             stats["excluded"] += 1
             drop(i, it, role, "excluded")
@@ -802,8 +820,12 @@ def main():
         # precise date says the same thing, the vague one doesn't stretch the span.
         precise = lambda d: d is not None and d[3] >= 9
         if precise(pit_d) or precise(p580) and precise(p582):
-            p580 = p580 if precise(p580) else None
-            p582 = p582 if precise(p582) else None
+            # ...only when it says the same thing: The Troubles' "1960s" start
+            # stays next to its precise 1998 end.
+            anchors = [d for d in (pit_d, p580, p582) if precise(d)]
+            covers = lambda v: any(span(v)[0] <= d[0] <= span(v)[1] for d in anchors)
+            p580 = p580 if precise(p580) or p580 and not covers(p580) else None
+            p582 = p582 if precise(p582) or p582 and not covers(p582) else None
             pit_d = pit_d if precise(pit_d) else None
             pits = [d for d in pits if d[3] >= 9]
         elif pit_d and (precise(p580) or precise(p582)):
@@ -817,7 +839,7 @@ def main():
             p580 = None
         # Signed on one day, in force from a later one (the Lateran Treaty,
         # 1929-1985): the signing is the event.
-        if pit_d and p580 and pit_d[3] >= 11 and p580[3] >= 11 and pit_d < p580:
+        if pit_d and p580 and pit_d[3] >= 11 and p580[3] >= 11 and pit_d < p580 and keep_root(i) in DOCUMENT_ROOTS:
             p580 = p582 = None
         start_d = p580 or pit_d or p582
         end_d = p582 or pit_d
@@ -851,7 +873,7 @@ def main():
             # Some kinds of event only make the map when well known: murders,
             # ceremonies, conventions, local politics, exhibitions, contests.
             bar = max(ROOT_MIN_SITELINKS.get(keep_root(i), 0), PERSONAL_MIN_SITELINKS if PERSONAL.match(it["title"]) else 0)
-            if it["title"].startswith("Assassination"):
+            if it["title"].startswith("Assassination") or i in vital:
                 bar = 0
             if sl < bar or SUB_EVENT.search(it["title"]):
                 stats["below_bar"] += 1
@@ -870,6 +892,8 @@ def main():
                     start_d = end_d = found_d
                 elif gone_d and 0 <= gone_d[0] - found_d[0] <= BOUNDED_YEARS:
                     start_d, end_d = found_d, gone_d
+            if start_d is None and keep_root(i) in DOCUMENT_ROOTS | LEGAL_ROOTS and (sl >= PUBLISHED_MIN_SITELINKS or i in vital):
+                start_d = end_d = best(ds.get("P577"))  # laws and court cases dated by publication (Roe v. Wade)
             if keep_root(i) in DOCUMENT_ROOTS and start_d and end_d and end_d[0] - start_d[0] > 1:
                 end_d = start_d  # signed once; years in force aren't the event
             if start_d is None:
@@ -888,13 +912,13 @@ def main():
                 # Known only by country: the capital, for events notable enough
                 # (elections would crowd every capital). Not for expeditions or
                 # meetings, which happened anywhere but there.
-                if notable and sl >= NATIONWIDE_MIN_SITELINKS and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS) \
+                if notable and (sl >= NATIONWIDE_MIN_SITELINKS and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS) or i in vital) \
                         and cat != "science" and keep_root(i) != "Q2761147":
                     stats["event:nationwide"] += 1
                 else:
                     pt, place = None, ""
             elif how:
-                if notable and sl >= (WIDE_VOYAGE_MIN_SITELINKS if cat == "science" else WORLDWIDE_MIN_SITELINKS):
+                if notable and (sl >= (WIDE_VOYAGE_MIN_SITELINKS if cat == "science" else WORLDWIDE_MIN_SITELINKS) or i in vital):
                     # Spread over places far apart: no pin, listed while in view.
                     place, pt, worldwide = wide_label(*how), centroid(how[0]), True
                     stats["event:wide"] += 1
@@ -904,8 +928,8 @@ def main():
                 stats["event_nocoord"] += 1
                 drop(i, it, role, "event: no usable place")
                 continue
-            if cat == "sports" and sl < (SPORTS_MIN_SITELINKS if keep_root(i) in EDITION_ROOTS or EDITION_TITLE.match(it["title"])
-                                         else MATCH_MIN_SITELINKS):
+            if cat == "sports" and i not in vital and sl < (SPORTS_MIN_SITELINKS if keep_root(i) in EDITION_ROOTS or EDITION_TITLE.match(it["title"])
+                                                            else MATCH_MIN_SITELINKS):
                 stats["sports_dropped"] += 1
                 drop(i, it, role, "sports/edition under the bar")
                 continue
@@ -1105,7 +1129,7 @@ def main():
         print(f"  {k}: {v}")
     print(f"  happenings: {len(happenings)}  standing: {len(standing)}")
 
-    write(happenings, standing, worldwide_recs)
+    write(happenings, standing, worldwide_recs, vital)
 
 
 _digest = hashlib.sha1()
@@ -1194,7 +1218,7 @@ def quadtree(recs, max_n, write_leaf):
     split(recs, -180, -90, 180, 90, "")
 
 
-def write(happenings, standing, worldwide):
+def write(happenings, standing, worldwide, vital=frozenset()):
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
     os.makedirs(OUT)
@@ -1209,8 +1233,11 @@ def write(happenings, standing, worldwide):
     lives = lambda r: r[7] in (BORN, DIED)
     # Long ones by the quarter millennium they began in (one slice for all
     # of them buried the Minoan eruption under Rome and Byzantium).
+    # Vital events have their own share of each tile: crowded years (1914,
+    # 1941) no longer bury the Christmas truce or the Dominican Civil War.
     for recs, key in ((short, lambda r: time_slice(r[4])), (long_, lambda r: r[4] // 250)):
-        assign_minzoom([r for r in recs if happened(r)], key)
+        assign_minzoom([r for r in recs if happened(r) and r[0] in vital], key)
+        assign_minzoom([r for r in recs if happened(r) and r[0] not in vital], key)
         assign_minzoom([r for r in recs if not happened(r) and not lives(r)], key, LOD_K_OTHER, LOD_OTHER_OFFSET)
         assign_minzoom([r for r in recs if lives(r)], key, LOD_K_OTHER, LOD_OTHER_OFFSET)
     # A barely known item doesn't belong in the world view just because its

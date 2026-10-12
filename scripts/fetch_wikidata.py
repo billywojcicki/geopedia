@@ -57,11 +57,12 @@ CANDIDATE = """
     { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P571 [] } UNION { ?item wdt:P1619 [] }
     { ?item wdt:P625 [] } UNION { ?item wdt:P276 ?_l . ?_l wdt:P625 [] } UNION { ?item wdt:P1427 ?_s . ?_s wdt:P625 [] }
   } UNION {
-    { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] }
+    { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P577 [] }
     { ?item wdt:P131 ?_m . ?_m wdt:P625 [] } UNION { ?item wdt:P17 [] }
   }
 """
-EVENT_DATE = "{ ?item wdt:P585 [] } UNION { ?item wdt:P580 [] }"
+# (P577, publication date: laws and court cases known by it, Roe v. Wade.)
+EVENT_DATE = "{ ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P577 [] }"
 
 # Location classes too vague to pin an event on: countries, states, continents,
 # oceans, seas, regions, peninsulas, rivers, mountain ranges... (big areas are
@@ -121,14 +122,18 @@ SELECT DISTINCT ?item ?c WHERE {{
     # port, a march's first town). ?cap/?big flag locations that are countries,
     # states, oceans etc. (their coordinate is a meaningless centroid).
     "loccoords": f"""
-SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area ?start WHERE {{
+SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area ?start ?lsl WHERE {{
   {ENWIKI}
-  {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }} UNION {{ ?item wdt:P571 [] }}
+  {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }} UNION {{ ?item wdt:P571 [] }} UNION {{ ?item wdt:P577 [] }}
   {{ ?item wdt:P276 ?loc }} UNION {{
     ?item wdt:P1427 ?loc . BIND(1 AS ?start)
     FILTER NOT EXISTS {{ ?item wdt:P276 ?_l . ?_l wdt:P625 [] }}
   }}
   ?loc wdt:P625 ?c .
+  # Not the archive or library that keeps a document (the Treaty of
+  # Tordesillas is not an event in Lisbon's Torre do Tombo).
+  FILTER NOT EXISTS {{ ?loc wdt:P31/wdt:P279* ?_a VALUES ?_a {{ wd:Q166118 wd:Q7075 }} }}
+  OPTIONAL {{ ?loc wikibase:sitelinks ?lsl }}  # the build prefers the best-known of several places
   FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
   OPTIONAL {{ ?loc wdt:P36 ?cap OPTIONAL {{ ?cap wdt:P625 ?capc }} }}
   OPTIONAL {{ ?loc wdt:P31 ?big VALUES ?big {{ {BIG_CLASSES} }} }}
@@ -220,7 +225,7 @@ SELECT DISTINCT ?a ?b WHERE {{
   ?a wdt:P31 ?b .
 }}"""
 
-for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249"]:
+for prop in ["P585", "P580", "P582", "P571", "P576", "P1619", "P1249", "P577"]:
     QUERIES[f"date_{prop}"] = f"""
 SELECT ?item (?tv AS ?t) (?pr AS ?prec) ?cal ?rk WHERE {{
   {ENWIKI}
