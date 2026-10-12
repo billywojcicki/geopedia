@@ -6,7 +6,7 @@ A map of history. Scroll around the world, drag the timeline, and see the Wikipe
 - **Zoomed in** on a city you get the local stuff: every battle, riot, treaty, building and birth that Wikipedia knows about there, plus the places that already existed at that point in time.
 - **The timeline** picks a year and a window around it (auto-sized by era, or pick your own). The map tints toward parchment and fades modern roads as you go back.
 - **Click anything** to read the Wikipedia summary in the side panel, or the full article inline.
-- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders (on by default before 1900), shareable links (Share button on every article), play button, light/dark mode.
+- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders (on by default before 1992), a night sky behind the globe (stars, the Milky Way, shooting stars; it swings the other way as the globe turns, like the view from a spacecraft), shareable links (Share button on every article), play button, light/dark mode.
 - **On phones** the panel is a bottom sheet (peek, half, full) you drag by its top. Tapping a pin opens the article at half height with the pin centred in the map above it; tapping the map or swiping down puts it away.
 
 ## Run it
@@ -71,6 +71,8 @@ Built for the X / Twitter in-app browser as much as for Safari and Chrome:
 
 Still a plain static site. The speed comes from never downloading or drawing what the current view can't show.
 
+**The night sky** (`js/space.js`) is two canvases behind the map: the stars and Milky Way are redrawn only when the camera moves (about 1 ms), shooting stars and twinkling repaint just their own few pixels at about 12 frames a second, and all of it stops once the globe fills the screen, in a background tab, or with reduced motion. To drop it, remove the `new Space(...)` line in `js/app.js`.
+
 **Level-of-detail data.** The build gives every happening a `minzoom`: the first map zoom at which it's among the 8 most notable things in its 512px map tile and time slice (a year after 1500, longer slices before). Records are then grouped into tiers, like map tiles but with time:
 
 | Tier | minzoom | Split by | Loaded when |
@@ -89,7 +91,9 @@ So the world view downloads only the world's top items for the window, and a cit
 
 **Historical borders, self-hosted.** The originals are 2-4 MB per era (600 KB gzipped from a CDN) and parsing one froze the page for most of a second. `scripts/build_borders.py` simplifies each era to about a pixel at zoom 5, 120 KB gzipped, and adds one label point per polity; the map's worker fetches and parses them, so changing era costs the page nothing. They load only once the map is idle, so they never slow the first view.
 
-**Old maps vs. today's.** The basemap is always today's (OpenStreetMap streets and buildings, modern country borders and names); nobody has historical street data at world scale. Going back in time it shifts to a parchment tint and fades roads, railways and buildings (mostly gone by 1750). Before 1900 the historical borders overlay is on by default and hides modern borders and country names; the Layers toggle overrides that.
+**Old maps vs. today's.** The basemap is always today's (OpenStreetMap streets and buildings, modern country borders and names); nobody has historical street data at world scale. Going back in time it shifts to a parchment tint and fades roads, railways and buildings (mostly gone by 1750). Before 1992 the historical borders overlay is on by default and hides modern borders and country names (in 1960 there's no Russia on the map, there's the Soviet Union); the Layers toggle overrides that.
+
+**Names of their time.** Labels on the map and places in the articles' details use the name a place had in the year shown: Leningrad in 1950 (Petrograd in 1920), Stalingrad in 1942, Constantinople before 1930, Bombay before 1995, Edo before 1868, the Gold Coast before 1957, the Soviet Union for Russia from 1922 to 1991 (and its republics as SSRs). One table, `basemap/old-names.json`, drives both the map (city, country and border labels, switched as the timeline crosses a renaming) and the data build. The border source's own labels are kept as they are and renamed through the same table ("USSR" shows as the Soviet Union).
 
 **One origin for the first view.** MapLibre, the map style, the world basemap and the Latin glyphs of the label fonts (regular, and italic for historical borders, whose names are folded to those ranges at build time) are all served from this site, so the first view needs no third-party server at all (other glyph ranges still come from OpenFreeMap when needed).
 

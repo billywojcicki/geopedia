@@ -11,6 +11,8 @@ import { Timeline } from './timeline.js';
 import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
 import { Borders } from './borders.js';
+import { applyOldNames, loadOldNames } from './oldnames.js';
+import { Space } from './space.js';
 import { Sheet } from './sheet.js';
 import { rankSearch } from './search.js';
 
@@ -24,7 +26,7 @@ const state = {
   borders: null, // null: automatic (on before AUTO_BORDERS_BEFORE); true/false: the user's choice
   selected: null,
 };
-let map, pins, timeline, borders, sheet;
+let map, pins, timeline, borders, sheet, space;
 let candidates = []; // current window, sorted by priority
 let candById = new Map();
 let theme = themeName();
@@ -82,11 +84,12 @@ async function init() {
     pixelRatio: Math.min(devicePixelRatio || 1, 2),
   });
   map.touchZoomRotate.disableRotation();
+  space = new Space(map, { home: DEFAULT_VIEW.center });
   // Start with attribution folded into its (i) button.
   map.once('idle', () => document.querySelector('.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show'));
   pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: toggle });
   borders = new Borders(map);
-  window.geopedia = { map, store, state, setYear, get candidates() { return candidates; } }; // for devtools
+  window.geopedia = { map, store, state, setYear, space, get candidates() { return candidates; } }; // for devtools
 
   map.on('style.load', onStyleLoad);
   map.once('load', onStyleLoad);
@@ -128,6 +131,7 @@ function onStyleLoad() {
   updateDots();
   applyAge(map, theme, lastAge = ageFor(state.year));
   borders.restore();
+  loadOldNames().then(() => { if (styleReady) applyOldNames(map, state.year); });
 }
 
 // The phone sheet moved: body classes drive the CSS, then the map padding and
@@ -160,10 +164,11 @@ function registerServiceWorker() {
 let lastAge = -1;
 let styleReady = false;
 
-// Historical borders are on by default before 1900, when today's borders
-// mislead; the Layers toggle overrides that for the session. They wait for the
-// map's first idle so they never slow down the first view.
-const AUTO_BORDERS_BEFORE = 1900;
+// Historical borders are on by default before 1992, when today's borders and
+// names mislead (no Russia in 1960: the Soviet Union); the Layers toggle
+// overrides that for the session. They wait for the map's first idle so they
+// never slow down the first view.
+const AUTO_BORDERS_BEFORE = 1992;
 let bordersReady = false;
 function syncBorders(dragging = false) {
   const on = state.borders ?? state.year < AUTO_BORDERS_BEFORE;
@@ -184,6 +189,7 @@ function setYear(y, { dragging = false } = {}) {
   const age = Math.round(ageFor(state.year) * 50) / 50;
   if (age !== lastAge && styleReady) { lastAge = age; applyAge(map, theme, age); }
   syncBorders(dragging);
+  if (styleReady) applyOldNames(map, state.year);
   // Prefetch only once the map is up, so it never competes with the first view.
   if (!dragging && map) store.prefetchAround(currentView());
   scheduleUpdate();
@@ -909,6 +915,7 @@ function bindChrome() {
   $('#opt-globe').addEventListener('change', e => {
     state.globe = e.target.checked;
     map?.setProjection({ type: state.globe ? 'globe' : 'mercator' });
+    space?.schedule();
   });
   $('#opt-borders').addEventListener('change', e => {
     state.borders = e.target.checked;

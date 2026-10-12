@@ -194,6 +194,30 @@ def read(name):
         yield from csv.DictReader(f)
 
 
+def load_old_names():
+    """Current name -> [(from, to, name of the time)] from basemap/old-names.json."""
+    with open(os.path.join(ROOT, "basemap", "old-names.json"), encoding="utf-8") as f:
+        table = json.load(f)
+    names = defaultdict(list)
+    for e in table["countries"] + table["cities"]:
+        if e.get("data", True):
+            for n in e["names"]:
+                names[n].extend(e["eras"])
+    return names
+
+
+def name_of_time(label, year, names):
+    """"Saint Petersburg" in 1950 -> "Leningrad"; each part of "Russia, Ukraine"."""
+    parts = []
+    for part in label.split(", "):
+        for a, b, old in names.get(part, ()):
+            if (a is None or a <= year) and (b is None or year < b):
+                part = old
+                break
+        parts.append(part)
+    return ", ".join(parts)
+
+
 def overrides():
     with open(os.path.join(os.path.dirname(__file__), "overrides.csv"), newline="", encoding="utf-8") as f:
         yield from csv.DictReader(f)
@@ -962,6 +986,16 @@ def main():
     worldwide_recs = [h for h in worldwide_recs if h[0] not in ids]
     standing = [p for p in standing if p[0] not in ids]
     stats["overrides"] = len(fixed)
+
+    # Places by their name of the time (basemap/old-names.json, shared with the
+    # map): "Died 1566 in Constantinople", "Premiered 1937 in Leningrad".
+    old_names = load_old_names()
+    for r in happenings + worldwide_recs + standing:
+        if r[12]:
+            renamed = name_of_time(r[12], r[4], old_names)
+            if renamed != r[12]:
+                r[12] = renamed
+                stats["renamed_places"] += 1
     standing = [p for p in standing if p[0] not in found]
 
     # "COVID-19 pandemic in Italy": a country's share of an epidemic the map

@@ -27,6 +27,7 @@ const BOOT = [
   'vendor/maplibre-gl@5.24.0/maplibre-gl.css',
   'basemap/world.json',
   'basemap/positron.json',
+  'basemap/old-names.json',
   'basemap/fonts/noto-sans-regular/0-255.pbf',
 ];
 const REVALIDATE_MS = 24 * 3600 * 1000;

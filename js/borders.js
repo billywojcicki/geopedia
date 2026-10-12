@@ -4,6 +4,8 @@
 // The map's worker fetches and parses each file, so switching eras never
 // stalls the page.
 
+import { applyOldNames } from './oldnames.js';
+
 const BASE = new URL('basemap/borders/', document.baseURI).href;
 // Must match SNAPSHOTS in scripts/build_borders.py.
 const SNAPSHOTS = [
@@ -54,6 +56,7 @@ export class Borders {
     if (!this.on) return;
     this.snapshot = s;
     this.ensureLayers();
+    applyOldNames(this.map, this.lastYear ?? s); // the labels' names of their time
     this.map.getSource('borders').setData(`${BASE}${keyFor(s)}.geojson`);
     this.map.getSource('borders-labels').setData(`${BASE}${keyFor(s)}.labels.geojson`);
   }

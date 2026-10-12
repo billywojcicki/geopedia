@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Build the self-hosted historical borders for the borders overlay.
 
+Labels keep the source's names; the map shows them as names of their time
+(basemap/old-names.json: "USSR" as the Soviet Union, "Ghana" in 1930 as the
+Gold Coast).
+
 Source: aourednik/historical-basemaps (GPL-3.0), one world GeoJSON per
 snapshot year. The originals are 2-4 MB each; drawn at world and continent
 scale they need far less, so each snapshot is simplified to about a pixel at
@@ -27,6 +31,12 @@ SNAPSHOTS = [
     100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1279, 1300, 1400, 1492, 1500, 1530, 1600, 1650,
     1700, 1715, 1783, 1800, 1815, 1880, 1900, 1914, 1920, 1930, 1938, 1945, 1960, 1994, 2000, 2010,
 ]
+
+# Fixes to the source: its 1930 world calls the whole Soviet Union "White
+# Russia" and keeps the Far Eastern Republic (merged in 1922). NAME -> (NAME, SUBJECTO).
+FIXES = {
+    1930: {"White Russia": ("USSR", "USSR"), "Far Eastern SSR": ("USSR", "USSR")},
+}
 
 DECIMALS = 2  # ~1 km
 TOLERANCE = 0.02  # degrees, about a pixel at zoom 5 (the outlines are approximate anyway)
@@ -92,7 +102,10 @@ def build(y):
     src = json.loads(get(SOURCE.format(name), os.path.join(CACHE, name)))
     shapes, labels = [], {}
     for f in src["features"]:
-        p = f.get("properties") or {}
+        p = dict(f.get("properties") or {})
+        fix = FIXES.get(y, {}).get(p.get("NAME"))
+        if fix:
+            p["NAME"], p["SUBJECTO"] = fix
         label = fold(p.get("NAME") or p.get("SUBJECTO") or "")
         g = geometry(f.get("geometry"))
         if not label or not g:

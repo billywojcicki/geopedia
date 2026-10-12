@@ -35,6 +35,9 @@
   color-scheme: light;
 }
 
+/* Over the night sky (js/space.js) light glass needs more white to stay white. */
+:root.space { --glass: rgba(255, 255, 255, 0.93); }
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #1c1c1e;
@@ -90,6 +93,9 @@ a { color: var(--link); text-decoration: none; }
 @media (prefers-color-scheme: dark) {
   #map { background: radial-gradient(ellipse at 50% 40%, #13161c 0%, #07080b 75%); }
 }
+/* Outer space behind the globe (js/space.js). */
+#map.space { background: radial-gradient(ellipse at 50% 45%, #0d1226 0%, #070a17 45%, #020309 100%); }
+#map .space-sky, #map .space-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .maplibregl-ctrl-attrib { font-size: 10px; background: var(--glass) !important; border-radius: 8px 0 0 0; }
 .maplibregl-ctrl-attrib a { color: var(--text-2) !important; }
 /* #map: more specific than maplibre-gl.css, which loads later. */
