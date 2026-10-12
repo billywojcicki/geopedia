@@ -26,6 +26,7 @@ const state = {
 };
 let map, pins, timeline, borders, sheet;
 let candidates = []; // current window, sorted by priority
+let candById = new Map();
 let theme = themeName();
 
 const span = () => (state.spanMode === 'auto' ? autoSpan(state.year) : state.spanMode);
@@ -61,7 +62,8 @@ async function init() {
   buildFilters();
   buildJourneys();
   bindChrome();
-  setYear(state.year); // requests the first view's data
+  setYear(state.year);
+  update(); // request the first view's data now, not after the map constructor's long task
 
   await libReady;
   addGlyphProtocol();
@@ -89,8 +91,8 @@ async function init() {
   map.on('style.load', onStyleLoad);
   map.once('load', onStyleLoad);
   bindDotEvents();
-  syncPadding();
-  new ResizeObserver(syncPadding).observe($('#timeline'));
+  syncPadding(false);
+  new ResizeObserver(() => syncPadding(false)).observe($('#timeline'));
   map.on('move', throttle(placePins, 120));
   map.on('moveend', onMoveEnd);
   // Clicking empty map deselects; on phones it also puts the sheet away.
@@ -107,7 +109,8 @@ async function init() {
   });
 
   refresh(); // data may already be in: place pins and dots on the new map
-  if (state.pendingSelect) openEntry({ id: state.pendingSelect }, { fly: false });
+  if (state.pendingSelect) openEntry({ id: state.pendingSelect, loc: state.pendingFile }, { fly: false });
+  addEventListener('hashchange', onHashChange);
   map.once('idle', () => {
     store.prefetchWorld();
     registerServiceWorker();
@@ -121,6 +124,7 @@ function onStyleLoad() {
   if (map.getLayer('dots')) return;
   styleReady = true;
   addLayers();
+  pins.attach();
   updateDots();
   applyAge(map, theme, lastAge = ageFor(state.year));
   borders.restore();
@@ -129,6 +133,8 @@ function onStyleLoad() {
 // The phone sheet moved: body classes drive the CSS, then the map padding and
 // pin placement follow the new free area.
 function onSheetChange(s) {
+  // Switched to the phone layout while reading: the article needs the sheet up.
+  if (sheet?.active && state.selected && s === 'peek') { sheet.allow(['half', 'full']); return; }
   const b = document.body.classList;
   b.remove('sheet-peek', 'sheet-half', 'sheet-full');
   if (sheet?.active) b.add(`sheet-${s}`);
@@ -141,6 +147,11 @@ function onSheetChange(s) {
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
   navigator.serviceWorker.register('sw.js').catch(() => {});
+  // Hand the new worker the data files this visit loaded before it existed.
+  navigator.serviceWorker.ready.then(reg => {
+    const urls = performance.getEntriesByType('resource').map(e => e.name).filter(u => u.includes('/data/') && u.includes('?v='));
+    reg.active?.postMessage({ type: 'cache', urls });
+  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -209,7 +220,7 @@ function update() {
   store.ensure(files); // each file that arrives schedules another update
   const loaded = files.filter(f => store.get(f));
   setLoading(loaded.length < files.length);
-  const sig = [view.a, view.b, displayZoom(view.zoom), [...state.cats].join(''), store.long.length, loaded.join()].join('|');
+  const sig = [view.a, view.b, displayZoom(view.zoom), [...state.cats].join(''), store.long.length, store.world.length, loaded.join()].join('|');
   if (sig !== lastSig) {
     lastSig = sig;
     recompute(view, loaded);
@@ -272,6 +283,8 @@ function recompute(view, files) {
   }
   out.sort((x, y) => y.prio - x.prio);
   candidates = out;
+  candById = new Map(out.map(r => [r.id, r]));
+  if (hoverId != null && !candById.has(hoverId)) hideHover(); // its pin or dot is gone
   updateDots();
   placePins();
   updateList();
@@ -303,16 +316,25 @@ function addLayers() {
 }
 
 // Layer-scoped handlers survive style swaps, so bind them once.
+// Pins sit inside the map's container, so their mouse events reach the map
+// too: those belong to the pin, not to a dot underneath it.
+const overPin = e => e.originalEvent?.target?.closest?.('.pin');
+
 function bindDotEvents() {
   map.on('mousemove', 'dots', e => {
-    const r = candidates[e.features[0].id];
+    if (overPin(e)) return;
+    const r = candById.get(e.features[0].properties.id);
     if (!r) return;
     map.getCanvas().style.cursor = 'pointer';
     showHover(r, null, e.point);
   });
-  map.on('mouseleave', 'dots', () => { map.getCanvas().style.cursor = ''; hideHover(); });
+  map.on('mouseleave', 'dots', e => {
+    map.getCanvas().style.cursor = '';
+    if (!overPin(e)) hideHover();
+  });
   map.on('click', 'dots', e => {
-    const r = candidates[e.features[0].id];
+    if (overPin(e)) return;
+    const r = candById.get(e.features[0].properties.id);
     if (r) toggle(r);
   });
 }
@@ -326,10 +348,10 @@ function updateDots() {
   if (!src) return;
   src.setData({
     type: 'FeatureCollection',
-    features: candidates.map((r, i) => ({
-      type: 'Feature', id: i,
+    features: candidates.map(r => ({
+      type: 'Feature',
       geometry: { type: 'Point', coordinates: [r.lng, r.lat] },
-      properties: { c: r.cat, s: r.prio, st: r.standing && !r.isNew ? 1 : 0 },
+      properties: { id: r.id, c: r.cat, s: r.prio, st: r.standing && !r.isNew ? 1 : 0 },
     })),
   });
 }
@@ -337,6 +359,7 @@ function updateDots() {
 function placePins() {
   if (!map) return;
   pins.place(candidates, state.selected?.world ? null : state.selected, obstacles());
+  if (hoverId != null && hoverFromPin && !pins.active.has(hoverId)) hideHover();
 }
 
 function onMoveEnd() {
@@ -371,16 +394,18 @@ function renderList() {
   const visible = candidates.filter(r => inView(r, bounds, globe));
   $('#list-title').textContent = span() === 0 ? fmtYear(state.year) : fmtRange(a, b);
   const zoom = map ? map.getZoom() : state.zoom ?? DEFAULT_VIEW.zoom;
-  const zoomHint = zoom < STANDING_ZOOM - 0.5 && state.standing ? ' · zoom in for more' : '';
+  const zoomHint = visible.length && zoom < STANDING_ZOOM - 0.5 && state.standing ? ' · zoom in for more' : '';
   $('#list-sub').textContent = `${visible.length.toLocaleString()} ${visible.length === 1 ? 'article' : 'articles'} in view${zoomHint}`;
-  // Worldwide events of these years (world wars...), which have no pin.
-  const world = store.world.filter(r => r.start <= b && r.end >= a && state.cats.has(r.cat)).slice(0, 3);
+  // Events of these years spread over many places (the world wars, the
+  // Napoleonic Wars), which have no pin: listed while one of their places is in view.
+  const world = store.world.filter(r => r.start <= b && r.end >= a && state.cats.has(r.cat)
+    && (r.pts.length ? r.pts.some(([lat, lng]) => inView({ lat, lng }, bounds, globe)) : true)).slice(0, 3);
   const strip = $('#list-world');
   strip.hidden = !world.length;
   setChildren(strip, world.map(r => {
     const icon = el('span', { class: 'globe', 'aria-hidden': 'true' });
     icon.innerHTML = GLOBE_SVG;
-    const btn = el('button', { class: 'world-chip', style: `--c:${catColor(r.cat)}`, title: `${r.title}, ${r.date}, worldwide` },
+    const btn = el('button', { class: 'world-chip', style: `--c:${catColor(r.cat)}`, title: metaLine(r) ? `${r.title}, ${metaLine(r)}` : r.title },
       icon, el('span', {}, r.title));
     btn.addEventListener('click', () => select(r));
     return btn;
@@ -401,6 +426,17 @@ function renderList() {
 
 const GLOBE_SVG = '<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5s1.2-6.1 3.8-8.5Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 
+// List rows act as buttons: focusable, and Enter or Space opens them.
+function pressable(node, fn) {
+  node.tabIndex = 0;
+  node.setAttribute('role', 'button');
+  node.addEventListener('click', fn);
+  node.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); }
+  });
+  return node;
+}
+
 function listItem(r) {
   const li = el('li', { style: `--c:${catColor(r.cat)}` },
     thumb(r, 96),
@@ -410,9 +446,9 @@ function listItem(r) {
       r.desc ? el('div', { class: 'li-desc' }, r.desc) : null,
     ),
   );
-  li.addEventListener('click', () => select(r, { fly: true }));
-  li.addEventListener('mouseenter', () => { pins.setHighlight(r.id); pulse(r); fetchSummary(r.title); });
-  li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
+  pressable(li, () => select(r, { fly: true }));
+  li.addEventListener('mouseenter', () => { pins?.setHighlight(r.id); pulse(r); fetchSummary(r.title); });
+  li.addEventListener('mouseleave', () => { pins?.setHighlight(null); pulse(null); });
   return li;
 }
 
@@ -432,7 +468,7 @@ let pulseMarker = null;
 function pulse(r) {
   pulseMarker?.remove();
   pulseMarker = null;
-  if (!r) return;
+  if (!r || !map || r.world) return;
   const node = el('div', { class: 'pin' }, el('div', { class: 'pulse', style: `--c:${catColor(r.cat)}` }));
   pulseMarker = new maplibregl.Marker({ element: node, anchor: 'center', opacityWhenCovered: '0' }).setLngLat([r.lng, r.lat]).addTo(map);
 }
@@ -441,17 +477,19 @@ function pulse(r) {
 // Hover card
 
 let hoverTimer = null;
+let hoverId = null, hoverFromPin = false;
 
 function showHover(r, node, point) {
   clearTimeout(hoverTimer);
+  hoverId = r.id;
+  hoverFromPin = !!node;
   hoverTimer = setTimeout(() => {
     const card = $('#hovercard');
     const people = r.kind === KIND.BORN || r.kind === KIND.DIED;
     card.className = `hovercard${people ? ' people' : ''}`;
     card.style.setProperty('--c', catColor(r.cat));
     setChildren(card,
-      // The 120px thumb (already cached by the pin) shows until the sharp one lands.
-      r.img ? el('div', { class: 'hc-img', style: `background-image:url("${thumbUrl(r.img, 330)}"),url("${thumbUrl(r.img, 120)}")` }) : null,
+      r.img ? hoverImage(r.img) : null,
       el('div', { class: 'hc-body' },
         el('div', { class: 'badge' }, el('span', { class: 'dot' }), categoryLabel(r)),
         el('div', { class: 'hc-title' }, r.title),
@@ -477,8 +515,19 @@ function showHover(r, node, point) {
   }, node ? 90 : 40);
 }
 
+// The 120px thumb (already cached by the pin) shows until the sharp one
+// lands; if neither loads, the image area goes rather than sit there grey.
+function hoverImage(path) {
+  const box = el('div', { class: 'hc-img', style: `background-image:url("${thumbUrl(path, 330)}"),url("${thumbUrl(path, 120)}")` });
+  const probe = new Image();
+  probe.onerror = () => box.remove();
+  probe.src = thumbUrl(path, 120);
+  return box;
+}
+
 function hideHover() {
   clearTimeout(hoverTimer);
+  hoverId = null;
   $('#hovercard').hidden = true;
 }
 
@@ -501,12 +550,27 @@ function toggle(r) {
 function select(r, { fly = false, zoom = null } = {}) {
   hideHover();
   state.selected = r;
-  pins.setSelected(r.id);
   showArticle(r);
+  if (!map) {
+    // Clicked in the list before the map is up: it opens on the item when ready.
+    if (!r.world) { state.center = [r.lng, r.lat]; state.zoom = Math.max(state.zoom ?? DEFAULT_VIEW.zoom, 5); }
+    return;
+  }
+  pins.setSelected(r.id);
   if (r.world) {
-    // No one place to pin: show the world it happened across.
-    if (fly) map.flyTo({ center: [r.lng, r.lat], zoom: Math.min(map.getZoom(), 1.6), duration: 1600, essential: true });
-    else placePins();
+    // No one place to pin: show the part of the world it happened across.
+    if (fly) {
+      const pts = r.pts?.length ? r.pts : [[r.lat, r.lng]];
+      const lats = pts.map(q => q[0]), lngs = pts.map(q => q[1]);
+      const w = Math.min(...lngs), e = Math.max(...lngs);
+      if (e - w > 150 || Math.max(...lats) - Math.min(...lats) > 80) {
+        map.flyTo({ center: [r.lng, r.lat], zoom: Math.min(map.getZoom(), 1.6), duration: 1600, essential: true });
+      } else {
+        map.fitBounds([[w, Math.min(...lats)], [e, Math.max(...lats)]], { padding: 60, maxZoom: 5, duration: 1600, essential: true });
+      }
+    } else {
+      placePins();
+    }
     writeHash();
     return;
   }
@@ -523,13 +587,21 @@ function select(r, { fly = false, zoom = null } = {}) {
 }
 
 // Keep the map's visual centre in the part not covered by the panels.
-function syncPadding() {
+// animate: glide along with the phone sheet (not on the first layout).
+function syncPadding(animate = true) {
   obstacleCache = null;
   if (!map) return;
   if (sheet.active) {
-    // Use where the sheet is going, not where it is mid-slide.
+    // Use where the sheet is going, not where it is mid-slide, and glide there
+    // with it. A full sheet keeps the half-sheet padding, so the selected pin
+    // stays on screen below the controls instead of in the strip at the top.
     const tl = sheet.state === 'peek' ? $('#timeline').offsetHeight + 10 : 0;
-    map.setPadding({ top: 0, right: 0, left: 0, bottom: sheet.visible() + tl });
+    const bottom = Math.min(sheet.visible(), sheet.visible('half')) + tl;
+    const padding = { top: 0, right: 0, left: 0, bottom };
+    if (map.getPadding().bottom === bottom) return;
+    // Selecting flies right after this, with the new padding: set it now.
+    if (state.selected || !animate) map.setPadding(padding);
+    else map.easeTo({ padding, duration: 420 });
     return;
   }
   const collapsed = document.body.classList.contains('collapsed');
@@ -580,9 +652,8 @@ function showArticle(r) {
   if (sheet.active) {
     sheet.allow(['half', 'full']);
     sheet.snap('half');
-  } else {
-    document.body.classList.remove('collapsed');
-    $('#expand').hidden = true;
+  } else if (document.body.classList.contains('collapsed')) {
+    setCollapsed(false);
   }
   $('#list-view').hidden = true;
   $('#article-view').hidden = false;
@@ -617,8 +688,9 @@ function showArticle(r) {
       ' under CC BY-SA 4.0. ', el('a', { href: `https://www.wikidata.org/wiki/Q${r.id}`, target: '_blank', rel: 'noopener' }, `Wikidata Q${r.id}`), '.'),
   );
 
+  let full = false; // the full article is in: a late summary mustn't replace it
   const loadSummary = () => fetchSummary(r.title).then(s => {
-    if (seq !== articleSeq) return;
+    if (seq !== articleSeq || full) return;
     if (s?.extract_html) {
       prose.innerHTML = s.extract_html;
     } else {
@@ -640,8 +712,9 @@ function showArticle(r) {
     readMore.textContent = 'Loading…';
     const html = await fetchArticle(r.title);
     if (seq !== articleSeq) return;
-    if (html) { prose.innerHTML = html; readMore.remove(); }
-    else { readMore.textContent = 'Couldn’t load the article'; }
+    if (html) { full = true; prose.innerHTML = html; readMore.remove(); return; }
+    readMore.disabled = false;
+    readMore.textContent = 'Couldn’t load it. Try again';
   });
 }
 
@@ -658,7 +731,7 @@ function nearbySection(r) {
     el('ul', { class: 'nearby' }, near.map(o => {
       const li = el('li', { style: `--c:${catColor(o.cat)}` }, thumb(o, 96),
         el('div', { class: 'li-body' }, el('div', { class: 'li-title' }, o.title), el('div', { class: 'li-meta' }, el('b', {}, metaLine(o)))));
-      li.addEventListener('click', () => select(o, { fly: true }));
+      pressable(li, () => select(o, { fly: true }));
       li.addEventListener('mouseenter', () => { pins.setHighlight(o.id); pulse(o); });
       li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
       return li;
@@ -670,12 +743,26 @@ function nearbySection(r) {
 // Search, random, journeys
 
 async function search(q) {
+  const input = $('#search');
   const results = $('#results');
-  if (normalize(q.trim()).length < 2) { results.hidden = true; return; }
-  const entries = await store.loadSearch();
+  if (normalize(q.trim()).length < 2) { results.hidden = true; input.setAttribute('aria-expanded', 'false'); return; }
+  // The first part of the index answers at once; the whole, once it's in.
+  let entries, complete = false;
+  try {
+    const all = store.loadSearch();
+    entries = await Promise.race([all, store.loadSearchFirst()]);
+    complete = entries === await Promise.race([all, Promise.resolve(null)]);
+    if (!complete) all.then(() => { if (input.value === q && document.activeElement === input) search(q); }, () => {});
+  } catch {
+    setChildren(results, el('li', { class: 'empty' }, 'Couldn’t load search. Check your connection and try again.'));
+    results.hidden = false;
+    return;
+  }
+  // The index may have taken a while: only show results for what's still typed.
+  if (input.value !== q || document.activeElement !== input) return;
   const top = rankSearch(entries, q);
   results.replaceChildren(...(top.length ? top.map((e, i) => {
-    const li = el('li', { role: 'option', 'aria-selected': i === 0 ? 'true' : 'false', style: `--c:${catColor(e.cat)}` },
+    const li = el('li', { id: `result-${i}`, role: 'option', 'aria-selected': i === 0 ? 'true' : 'false', style: `--c:${catColor(e.cat)}` },
       el('span', { class: 'dot' }), el('span', { class: 'r-title' }, e.title),
       el('span', { class: 'r-meta' }, resultMeta(e)));
     li.addEventListener('mousedown', ev => { ev.preventDefault(); chooseResult(e); });
@@ -683,12 +770,14 @@ async function search(q) {
     return li;
   }) : [el('li', { class: 'empty' }, 'No matches among notable articles')]));
   results.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+  input.setAttribute('aria-activedescendant', top.length ? 'result-0' : '');
 }
 
 function resultMeta(e) {
-  if (e.kind >= KIND.BUILT && e.kind <= KIND.ESTABLISHED) return `${KIND_VERB[e.kind]} ${fmtYear(e.start)}`;
+  if (e.kind >= KIND.BUILT && e.kind <= KIND.ESTABLISHED) return `${KIND_VERB[e.kind]} ${e.label || fmtYear(e.start)}`;
   const when = e.kind === KIND.EVENT ? fmtRange(e.start, e.end) : `${KIND_VERB[e.kind]} ${fmtYear(e.start)}`;
-  return e.loc === 'world' ? `${when} · Worldwide` : when;
+  return e.loc === 'world' && e.label ? `${when} · ${e.label}` : when;
 }
 
 let choosing = false;
@@ -700,30 +789,35 @@ function chooseResult(e) {
   openEntry(e, { fly: true }).finally(() => { choosing = false; });
 }
 
-// Open an item known only by id + basics (search, random, shared link).
+// Open an item known by id (a search result, Surprise me, a shared link):
+// from data already loaded, else the one file that holds it (the search index
+// and shared links say which), else look it up in the search index.
 async function openEntry(e, { fly }) {
-  if (e.lat == null) {
-    const all = await store.loadSearch();
-    const full = all.find(x => x.id === e.id);
-    if (!full) return;
-    e = full;
+  let rec = store.findLoaded(e.id);
+  if (!rec && e.loc) rec = await store.findRecord(e);
+  if (!rec && !e.loc) {
+    // An older link with no file: usually in the first view's data, on its way.
+    await store.ensure(store.filesFor(currentView()));
+    rec = store.findLoaded(e.id);
   }
+  if (!rec) {
+    const all = await store.loadSearch().catch(() => null);
+    const entry = all?.find(x => x.id === e.id);
+    if (entry) rec = await store.findRecord(entry);
+  }
+  if (!rec) return;
   // Only move the timeline if the item isn't part of the current window.
-  const isPlace = e.kind >= KIND.BUILT && e.kind <= KIND.ESTABLISHED;
+  const isPlace = rec.kind >= KIND.BUILT && rec.kind <= KIND.ESTABLISHED;
   const [a, b] = range();
-  const inWindow = isPlace ? e.start <= b : e.start <= b && e.end >= a;
-  if (!inWindow) setYear(e.start);
-  // The search index says which file holds the record: one small fetch.
-  let rec = await store.findRecord(e);
-  if (!rec && isPlace) rec = await store.findStanding(e.id, e.lng, e.lat);
-  if (rec?.standing) rec.isNew = rec.start >= range()[0];
-  rec = rec || { ...e, score: 1, img: '', desc: '', date: fmtYear(e.start), place: '', standing: false, minzoom: 0, world: e.loc === 'world' };
+  const inWindow = isPlace ? rec.start <= b : rec.start <= b && rec.end >= a;
+  if (!inWindow) setYear(rec.start);
+  if (rec.standing) rec.isNew = rec.start >= range()[0];
   // Select first, so on phones the sheet is up before the flight aims the pin above it.
-  select(rec, { fly, zoom: isPlace ? 13 : e.kind === KIND.EVENT ? 8 : 9 });
+  select(rec, { fly, zoom: isPlace ? 13 : rec.kind === KIND.EVENT ? 8 : 9 });
 }
 
 async function randomPick() {
-  const all = await store.loadSearch();
+  const all = await store.loadSearchFirst().catch(() => []);
   const pool = all.slice(0, 6000).filter(e => state.cats.has(e.cat));
   const e = pool[Math.floor(Math.random() * pool.length)];
   if (e) openEntry(e, { fly: true });
@@ -738,7 +832,9 @@ function buildJourneys() {
       state.spanMode = j.span;
       syncSpanSelect();
       setYear(j.year);
-      if (j.center) map.flyTo({ center: j.center, zoom: j.zoom, duration: 2200, essential: true });
+      if (!j.center) return;
+      if (map) map.flyTo({ center: j.center, zoom: j.zoom, duration: 2200, essential: true });
+      else { state.center = j.center; state.zoom = j.zoom; }
     });
     return b;
   }));
@@ -776,17 +872,18 @@ function buildFilters() {
   }));
 }
 
+function setCollapsed(c) {
+  document.body.classList.toggle('collapsed', c);
+  $('#expand').hidden = !c;
+  setTimeout(() => { syncPadding(); placePins(); }, 360);
+}
+
 function bindChrome() {
-  $('#zoom-in').addEventListener('click', () => map.zoomIn());
-  $('#zoom-out').addEventListener('click', () => map.zoomOut());
+  $('#zoom-in').addEventListener('click', () => map?.zoomIn());
+  $('#zoom-out').addEventListener('click', () => map?.zoomOut());
   $('#back').addEventListener('click', closeArticle);
   $('#close').addEventListener('click', closeArticle);
   $('#share').addEventListener('click', share);
-  const setCollapsed = c => {
-    document.body.classList.toggle('collapsed', c);
-    $('#expand').hidden = !c;
-    setTimeout(() => { syncPadding(); placePins(); }, 360);
-  };
   $('#collapse').addEventListener('click', () => setCollapsed(true));
   $('#expand').addEventListener('click', () => setCollapsed(false));
   $('#random').addEventListener('click', randomPick);
@@ -807,7 +904,7 @@ function bindChrome() {
   $('#opt-standing').addEventListener('change', e => { state.standing = e.target.checked; refresh(); });
   $('#opt-globe').addEventListener('change', e => {
     state.globe = e.target.checked;
-    map.setProjection({ type: state.globe ? 'globe' : 'mercator' });
+    map?.setProjection({ type: state.globe ? 'globe' : 'mercator' });
   });
   $('#opt-borders').addEventListener('change', e => {
     state.borders = e.target.checked;
@@ -852,7 +949,7 @@ function bindChrome() {
   input.addEventListener('input', doSearch);
   let before = null; // sheet state to return to after searching (phones)
   input.addEventListener('focus', () => {
-    store.loadSearch();
+    store.loadSearch().catch(() => {});
     if (input.value) search(input.value);
     if (sheet.active && sheet.state !== 'full') { before = sheet.state; sheet.snap('full'); }
     document.body.classList.add('searching');
@@ -870,11 +967,13 @@ function bindChrome() {
       e.preventDefault();
       const n = clamp(cur + (e.key === 'ArrowDown' ? 1 : -1), 0, items.length - 1);
       items.forEach((li, i) => li.setAttribute('aria-selected', String(i === n)));
+      if (items[n]) input.setAttribute('aria-activedescendant', items[n].id);
     } else if (e.key === 'Enter' && items[cur]) {
       chooseResult(items[cur]._entry);
     } else if (e.key === 'Escape') {
       input.value = '';
       $('#results').hidden = true;
+      input.setAttribute('aria-expanded', 'false');
       input.blur();
     }
   });
@@ -883,7 +982,10 @@ function bindChrome() {
     if (e.target.closest('input, select, textarea')) return;
     if (e.key === '/') { e.preventDefault(); input.focus(); }
     if (e.key === 'Escape' && state.selected) closeArticle();
-    if (e.key === '[' || e.key === ']') setYear(state.year + (e.key === ']' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+    // e.code: with Shift held, e.key is "{" or "}" on many layouts.
+    if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+      setYear(state.year + (e.code === 'BracketRight' ? 1 : -1) * (e.shiftKey ? 10 : 1));
+    }
   });
 }
 
@@ -895,12 +997,31 @@ function readHash() {
   const y = parseInt(p.get('y'), 10);
   if (!Number.isNaN(y)) state.year = clamp(y, MIN_YEAR, MAX_YEAR);
   const w = p.get('w');
-  if (w) state.spanMode = w === 'auto' ? 'auto' : clamp(parseInt(w, 10) || 0, 0, 1000);
+  if (w) {
+    const n = parseInt(w, 10);
+    state.spanMode = w === 'auto' || Number.isNaN(n) ? 'auto' : clamp(n, 0, 1000);
+  }
   const m = (p.get('m') || '').split(',').map(Number);
-  if (m.length === 3 && m.every(Number.isFinite)) { state.center = [m[1], m[0]]; state.zoom = m[2]; }
+  if (m.length === 3 && m.every(Number.isFinite)) {
+    state.center = [((m[1] + 540) % 360) - 180, clamp(m[0], -85, 85)];
+    state.zoom = clamp(m[2], 0, 20);
+  }
   const a = parseInt(p.get('a'), 10);
-  if (a) state.pendingSelect = a;
+  state.pendingSelect = a > 0 ? a : null;
+  state.pendingFile = p.get('f') || null;
   if (state.spanMode !== 'auto') queueMicrotask(syncSpanSelect);
+}
+
+// A link pasted into an open tab: go there.
+function onHashChange() {
+  if (location.hash === currentHash()) return;
+  const was = state.selected?.id;
+  readHash();
+  syncSpanSelect();
+  setYear(state.year);
+  if (state.center) map.jumpTo({ center: state.center, zoom: state.zoom });
+  if (state.pendingSelect && state.pendingSelect !== was) openEntry({ id: state.pendingSelect, loc: state.pendingFile }, { fly: false });
+  else if (!state.pendingSelect && state.selected) closeArticle();
 }
 
 function currentHash() {
@@ -911,8 +1032,12 @@ function currentHash() {
     const c = map.getCenter();
     p.set('m', `${c.lat.toFixed(4)},${c.lng.toFixed(4)},${map.getZoom().toFixed(2)}`);
   }
-  if (state.selected) p.set('a', state.selected.id);
-  return '#' + p.toString().replace(/%2C/g, ',');
+  if (state.selected) {
+    p.set('a', state.selected.id);
+    // The file holding it: opening the link then needs no search index.
+    if (state.selected.file) p.set('f', state.selected.file);
+  }
+  return '#' + p.toString().replace(/%2C/g, ',').replace(/%2F/g, '/');
 }
 
 const writeHash = debounce(() => {

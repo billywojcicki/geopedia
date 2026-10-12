@@ -74,12 +74,14 @@ Still a plain static site. The speed comes from never downloading or drawing wha
 | Tier | minzoom | Split by | Loaded when |
 | --- | --- | --- | --- |
 | `a/` | 0-3 | time chunks, whole world | always |
-| `b/` | 4-5 | z2 map tiles x time chunks | zoom >= 3 |
-| `c/` | 6-7 | z4 map tiles x time chunks | zoom >= 5 |
-| `d/` | 8+ | small map areas, every era in one file | zoom >= 7 |
+| `b/` | 4-5 | z2 map tiles x time chunks | zoom 3-6 |
+| `c/` | 6-7 | z4 map tiles x time chunks | zoom 5-6 |
+| `d/` | 4+ | small map areas, every era in one file | zoom >= 7 (instead of b/ and c/) |
 | `p/` | places that existed | small map areas, every era | zoom >= 8.5 |
 
-So the world view downloads only the world's top items for the window, and a city view downloads only that city (every era of it, so scrubbing the timeline there needs no network at all). The search index records which file holds each item, so opening a search result is one small fetch.
+So the world view downloads only the world's top items for the window, and a city view downloads only that city (every era of it, so scrubbing the timeline there needs no network at all). Each chunk lists its last end year, so chunks that end before the window are skipped. Long happenings that only show zoomed in (`long-2.json`) load from zoom 4. Detail files are picked nearest the middle of the screen first.
+
+**Shared links and search.** A shared link names the file holding its article (`&f=a/0-0-7`), so opening one is a single small fetch, often one the first view needs anyway. The search index comes in two parts: the 10k most notable entries (216 KB gzipped) answer the first keystroke, and the rest (700 KB) follows.
 
 **Our own world basemap.** OpenFreeMap's world-level tiles are 300-700 KB each, so the default view used to pull ~5.5 MB of tiles (plus 1.2 MB of shaded-relief images) and showed a patchy map while they arrived. Below zoom 6 the map now draws only `basemap/world.json`: Natural Earth 1:50m land, lakes, borders and labels, simplified to what those zooms can show and delta-encoded, 170 KB gzipped. OpenFreeMap tiles load only from zoom 6, where they're smaller; our coarse land stays underneath until zoom 7.5 so the sea never flashes land-coloured while they arrive. The relief layer is gone (it was also why zooming in looked blurry).
 
@@ -87,11 +89,11 @@ So the world view downloads only the world's top items for the window, and a cit
 
 **Old maps vs. today's.** The basemap is always today's (OpenStreetMap streets and buildings, modern country borders and names); nobody has historical street data at world scale. Going back in time it shifts to a parchment tint and fades roads, railways and buildings (mostly gone by 1750). Before 1900 the historical borders overlay is on by default and hides modern borders and country names; the Layers toggle overrides that.
 
-**One origin for the first view.** MapLibre, the map style, the world basemap and the Latin glyphs of the label font are all served from this site, so the first view needs no third-party server at all (other glyph ranges still come from OpenFreeMap when needed).
+**One origin for the first view.** MapLibre, the map style, the world basemap and the Latin glyphs of the label fonts (regular, and italic for historical borders, whose names are folded to those ranges at build time) are all served from this site, so the first view needs no third-party server at all (other glyph ranges still come from OpenFreeMap when needed).
 
 **Startup.** `index.html` starts fetching the data index, map style and world basemap before any script runs, all JS modules are preloaded in parallel, and the app module runs before MapLibre (the biggest download) arrives, so the first view's data is already in flight. Pins and the sidebar list go up as soon as the data lands, without waiting for map tiles.
 
-**Caching.** Data URLs carry a build hash (`?v=...`), so `sw.js` serves them cache-first forever and drops old versions. Map tiles, fonts, the basemap and MapLibre are cached too. Neighbouring time chunks are prefetched at low network priority, and on a fast connection all world-level chunks load in the background a few seconds after startup, so scrubbing the timeline zoomed out is instant.
+**Caching.** Data URLs carry a build hash (`?v=...`), so `sw.js` serves them cache-first forever and drops old versions. Map tiles, fonts, the basemap and MapLibre are cached too. The worker starts after the first visit has loaded, so on install it caches the boot files and the data files that visit already downloaded (from the HTTP cache): the second visit is as fast as later ones. The basemap is refreshed in the background at most once a day. Thumbnails that just failed (Wikimedia rate-limits) aren't asked for again for two minutes. Neighbouring time chunks are prefetched at low network priority, and on a fast connection all world-level chunks load in the background a few seconds after startup, so scrubbing the timeline zoomed out is instant.
 
 **Main thread.** Timeline scrubbing and data arrivals are coalesced into at most one update per animation frame, and an update with nothing new skips the work. Pin placement measures text once and caches panel geometry.
 
@@ -118,8 +120,9 @@ Full Wikipedia text is tens of GB, so the static part is an index (title, place,
 
 **What's on the map.** Events are the point; places and people are the backdrop.
 
-1. **Events** with a date (`point in time`, or `start`/`end time`) and a place. The place is, in order: the event's own coordinates; its `location` if that's a city or site; its `located in` (P131) district or city. Notable events (10+ language editions) known only by country, like reforms, crises and revolutions, are pinned on that country's capital and labelled with the country. National elections are left out of that fallback (they'd crowd every capital). Events whose places are far apart are pinned on their most central place (countries count by their capital), or, past 5,000 km, are **worldwide**: the world wars, the Cold War, the Holocaust, the Black Death and about 20 more have no pin. They're listed under the heading of the years they cover, are searchable, and opening one shows the whole world. About 38k.
-2. **Premieres and discoveries**: operas, plays and ballets at the theatre where they premiered, and scientific discoveries where they were made (not chemical elements "discovered in Sweden"). About 3.4k.
+1. **Events** with a date (`point in time`, or `start`/`end time`) and a place. The place is, in order: the event's own coordinates; its `location` if that's a city or site; its `located in` (P131) district or city. Countries, states, continents, oceans, seas, regions and anything over 20,000 km² are too vague to pin on. Notable events (10+ language editions) known only by one country, like reforms, crises and revolutions, are pinned on that country's capital *of the time* (the Ottoman Empire's is Bursa, then Edirne, then Constantinople) and labelled with the country. National elections are left out of that fallback (they'd crowd every capital). Events located only in a few nearby regions (the Six-Day War: Sinai, Golan, West Bank) are pinned on the most central one.
+   Notable events whose places are far apart (25+ language editions), like the world wars, the Napoleonic Wars, the Hundred Years' War and the Crusades, have no pin at all: about 570 of them are listed as chips under the list's heading whenever one of their places is in view, are searchable, and opening one zooms out to show where they happened. About 40k events in all.
+2. **Premieres, discoveries and launches**: operas, plays and ballets at the theatre where they premiered, scientific discoveries where they were made (not chemical elements "discovered in Sweden"), and spacecraft from their launch pad (Sputnik 1, Apollo 11). About 4.6k.
 3. **Places** with a founding date (`inception` or `opening date`): buildings, towns, institutions, historical states. They appear as a "Built / Founded / Established" event in their year, and when zoomed in they also appear (in grey) for every year they existed, until `dissolved/demolished` if known. About 250k.
 4. **People** with 25+ Wikipedia language editions: births and deaths at the birth/death place. About 80k. Off by default.
 
@@ -127,8 +130,8 @@ Full Wikipedia text is tens of GB, so the static part is an index (title, place,
 
 | Category | What's in it |
 | --- | --- |
-| War & conflict | Battles, sieges, wars, raids, massacres, genocides, revolts, insurgencies, coups, military operations |
-| Politics & society | Treaties, revolutions, reforms, protests, strikes, social movements, elections, summits, councils, coronations, scandals, assassinations, economic crises and crashes |
+| War & conflict | Battles, sieges, wars, raids, massacres, genocides, revolts, insurgencies, coups, military operations, mass shootings |
+| Politics & society | Treaties, revolutions, reforms, protests, strikes, social movements, elections, summits, councils, coronations, scandals, trials, assassinations, economic crises and crashes |
 | Disasters | Earthquakes, eruptions, floods, fires, famines, epidemics, shipwrecks, air and rail accidents |
 | Arts & culture | Festivals, exhibitions, world's fairs, art movements, golden ages, premieres, the biggest sports events |
 | Science & discovery | Expeditions, experiments, discoveries, space missions, launches, nuclear tests |
@@ -137,7 +140,9 @@ Full Wikipedia text is tens of GB, so the static part is an index (title, place,
 
 Events with no usable class get one from unambiguous title wording ("Battle of", "massacre", "mine disaster"); anything else unclassified shows under Politics & society.
 
-**Dropped as noise.** Sports seasons and matches, and other yearly editions (pageants, film festivals, championships, drafts), unless 40+ language editions, so World Cups and Olympics stay. Award ceremonies and honours lists, concert tours, eclipses, radio/TV stations, films, TV shows, languages, paintings and other artworks, currencies, newspapers, modern countries (centroid coordinates), constituencies, "List of" articles.
+**Dropped as noise.** Sports seasons and matches, and other yearly editions (pageants, film festivals, championships, drafts), unless 40+ language editions, so World Cups and Olympics stay. Award ceremonies and honours lists, concert tours, eclipses and saros series, radio/TV stations, films, TV shows, seasons and episodes, languages, paintings and other artworks, currencies, newspapers, ships and aircraft (the Titanic was built in 1909; its sinking has its own article), modern countries (centroid coordinates), constituencies, "List of" articles.
+
+**Dates.** As Wikidata shows them, not as its export stores them: dates before 1583 entered in the Julian calendar are converted back (the Battle of Hastings is 14 October 1066, not the 20th), centuries and millennia BC read as Wikidata means them (the 3rd century BC is 300-201 BC), deprecated statements are ignored and preferred ones win (the Battle of Marathon: 12 September 490 BC). A vague date (a decade, a century) doesn't stretch an event that also has a precise one. Stated spans read as spans: "16-19 Oct 1813", "6 Apr - 29 May 1453", "44 BC - AD 14".
 
 **Ranking.** Importance = number of Wikipedia language editions with an article (sitelinks), times a weight per kind, times 1.15 if there's a photo:
 

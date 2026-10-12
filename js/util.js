@@ -39,6 +39,7 @@ export function fmtYear(y) {
 export function fmtRange(a, b) {
   if (a === b) return fmtYear(a);
   if (a <= 0 && b <= 0) return `${1 - a}–${1 - b} BC`;
+  if (a <= 0) return `${fmtYear(a)} – AD ${b}`; // "44 BC – AD 14"
   return `${fmtYear(a)} – ${fmtYear(b)}`;
 }
 
@@ -99,6 +100,7 @@ export function metaLine(r) {
   if (!r.place) return s;
   if (r.kind === KIND.BORN || r.kind === KIND.DIED) return `${s} in ${r.place}`;
   if (r.kind === KIND.PREMIERED || r.kind === KIND.DISCOVERED) return `${s} at ${r.place}`;
+  if (r.kind === KIND.LAUNCHED) return `${s} from ${r.place}`;
   return `${s} · ${r.place}`;
 }
 
@@ -130,17 +132,31 @@ function maxWidth(path) { return /\.png$/i.test(path) ? 500 : 960; }
 // it also gets a srcset, so the browser picks by screen density. If a size fails (the original is
 // smaller, or a hiccup), step down to smaller sizes, never up to the
 // full-size original, which can be many megabytes.
+// Thumbnails that failed lately (often a 429 from Wikimedia): lists re-render
+// all the time, and asking again at once only prolongs the rate limit.
+const badThumbs = new Map(); // url -> when it failed
+const BAD_THUMB_MS = 120000;
+const isBad = url => Date.now() - (badThumbs.get(url) || 0) < BAD_THUMB_MS;
+
 export function wikiImg(path, width, attrs = {}) {
   const cap = maxWidth(path);
   let sizes = SIZES.filter(w => w >= Math.min(width, cap) && w <= cap);
   if (!sizes.length) sizes = [cap];
-  const img = el('img', { src: thumbUrl(path, sizes[0]), alt: '', loading: 'lazy', decoding: 'async', ...attrs });
-  if (attrs.sizes && sizes.length > 1) img.srcset = sizes.map(w => `${thumbUrl(path, w)} ${w}w`).join(', ');
-  let fallback = SIZES.filter(w => w < sizes[0]).reverse();
+  const fallback = SIZES.filter(w => w < sizes[0] && w >= 120).reverse();
+  const usable = [...sizes, ...fallback].filter(w => !isBad(thumbUrl(path, w)));
+  const img = el('img', { alt: '', loading: 'lazy', decoding: 'async', ...attrs });
+  if (!usable.length) {
+    queueMicrotask(() => { img.remove(); img.dispatchEvent(new Event('error')); }); // callers drop the image
+    return img;
+  }
+  img.src = thumbUrl(path, usable[0]);
+  const rest = usable.filter(w => w < usable[0]);
+  if (attrs.sizes && sizes.length > 1 && usable[0] === sizes[0]) img.srcset = sizes.map(w => `${thumbUrl(path, w)} ${w}w`).join(', ');
   img.addEventListener('error', () => {
+    if (img.currentSrc || img.src) badThumbs.set(img.currentSrc || img.src, Date.now());
     img.removeAttribute('srcset');
-    const w = fallback.shift();
-    if (w >= 120) img.src = thumbUrl(path, w);
+    const w = rest.shift();
+    if (w) img.src = thumbUrl(path, w);
     else img.remove();
   });
   return img;

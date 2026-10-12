@@ -46,11 +46,12 @@ csv.field_size_limit(1 << 24)
 
 CAT = {c: i for i, c in enumerate(CATEGORIES)}
 # kind codes (js/config.js KIND_VERB must match)
-EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED, PREMIERED, DISCOVERED = range(8)
-HAPPENED = {EVENT, PREMIERED, DISCOVERED}  # things that happened, as opposed to places and lives
+EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED, PREMIERED, DISCOVERED, LAUNCHED = range(9)
+HAPPENED = {EVENT, PREMIERED, DISCOVERED, LAUNCHED}  # things that happened, as opposed to places and lives
 
 LONG_SPAN = 25  # years; longer happenings go to long.json
 SEARCH_MAX = 40000  # happenings in the search index
+SEARCH_FIRST = 10000  # entries in its first part (search.json; the rest is search-2.json)
 SEARCH_MAX_PLACES = 6000  # plus this many places known only from the standing layer
 SEARCH_MIN_PLACE_SCORE = 10
 LOD_K = 8  # events per 512px tile per time slice before the rest wait for a deeper zoom
@@ -82,6 +83,7 @@ WEIGHT = {
     "event": 0.75,  # dated event with no recognised class
     "premiere": 0.8,
     "discovery": 0.9,
+    "launch": 0.9,
     # Places and people collect sitelinks far more easily than events (every
     # language edition has an article on every city), and they're the backdrop
     # rather than the story, so they're scaled well down.
@@ -97,8 +99,8 @@ WEIGHT = {
 # description when the wording is unambiguous ("Battle of...", "... mine disaster").
 GUESS_CAT = [
     ("conflict", re.compile(r"\b(battle|siege|action of|raid|massacre|war|rebellion|uprising|revolt|invasion|"
-                            r"bombing|attack|skirmish|insurgency|mutiny|ambush|offensive|operation|campaign against|"
-                            r"naval engagement|sack of|capture of|fall of|liberation of|occupation of|pogrom|"
+                            r"bombing|attack|skirmish|insurgency|mutiny|ambush|offensive|campaign against|"
+                            r"naval engagement|sack of|capture of|liberation of|occupation of|pogrom|"
                             r"shooting|assassination|terrorist|clash|clashes|coup|riot|riots|fighting|incursion)\b", re.I)),
     ("disaster", re.compile(r"\b(disaster|earthquake|flood|fire|explosion|hurricane|typhoon|cyclone|tornado|"
                             r"eruption|tsunami|famine|epidemic|pandemic|outbreak|plague|crash|derailment|"
@@ -110,18 +112,30 @@ GUESS_CAT = [
 ]
 
 
-def guess_cat(title, desc):
-    text = f"{title} {desc}"
+def guess_cat(title):
+    """From the title only: descriptions mention wars and operations in passing."""
     for cat, rx in GUESS_CAT:
-        if rx.search(text):
+        if rx.search(title):
             return cat
     return None
+
+
+def day_of_year(d):
+    return (d[1] - 1) * 31 + d[2]
+
+
+def year_of(t):
+    """Year of an xsd:dateTime string, or None."""
+    m = re.match(r"^(-?\d+)-", t or "")
+    return int(m.group(1)) if m else None
 
 
 # Continents, oceans, seas, regions: an event listing two of these is spread out.
 REGION_CLASSES = {"Q5107", "Q9430", "Q165", "Q82794", "Q2221906"}
 LOCAL_KM = 500  # an event's places further apart than this aren't one place
-WORLDWIDE_MIN_SITELINKS = 40  # events spread over several regions must be this notable
+VAGUE_AREA = 2e10  # m² (20,000 km²): a location this big is a region, not a place
+HUGE_AREA = 2e11  # m² (200,000 km²): too big even to stand in for an event's place
+WORLDWIDE_MIN_SITELINKS = 25  # events spread over several regions must be this notable
 WORLD_KM = 5000  # places further apart than this: a worldwide event, not pinned
 NATIONWIDE_MIN_SITELINKS = 10  # events known only by country must be this notable
 WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
@@ -178,39 +192,92 @@ def centroid(pts):
     return round(max(-60, min(70, lat)), 4), round(lon, 4)
 
 
-def parse_time(t, prec):
-    """-> (year, month, day, precision) or None. Years are astronomical."""
+JULIAN = "http://www.wikidata.org/entity/Q1985786"
+
+
+def julian_from_gregorian(y, m, d):
+    """The RDF export stores Julian-calendar dates converted to the proleptic
+    Gregorian calendar; Wikipedia and Wikidata show them as entered (the
+    Battle of Hastings: 14 October 1066, not 20 October)."""
+    a = (14 - m) // 12
+    yy, mm = y + 4800 - a, m + 12 * a - 3
+    jdn = d + (153 * mm + 2) // 5 + 365 * yy + yy // 4 - yy // 100 + yy // 400 - 32045
+    c = jdn + 32082
+    dd = (4 * c + 3) // 1461
+    e = c - 1461 * dd // 4
+    mo = (5 * e + 2) // 153
+    return dd - 4800 + mo // 10, mo + 3 - 12 * (mo // 10), e - (153 * mo + 2) // 5 + 1
+
+
+def parse_time(t, prec, cal=""):
+    """-> (year, month, day, precision) or None. Day and year precision years
+    are astronomical (0 = 1 BC); coarser BC values are not (the export writes
+    the 3rd century BC as -300), which span() and date_label() account for."""
     m = re.match(r"^(-?)(\d+)-(\d\d)-(\d\d)", t or "")
     if not m:
         return None
     y = int(m.group(2)) * (-1 if m.group(1) else 1)
+    mo, d = int(m.group(3)), int(m.group(4))
     try:
         p = int(prec)
     except ValueError:
         p = 9
-    return y, int(m.group(3)), int(m.group(4)), p
+    if p >= 11 and cal == JULIAN and mo and d:
+        y, mo, d = julian_from_gregorian(y, mo, d)
+    return y, mo, d, p
+
+
+RANK = {"PreferredRank": 2, "NormalRank": 1}
+
+
+def rank_of(iri):
+    """2 preferred, 1 normal, 0 deprecated (dropped)."""
+    return RANK.get((iri or "NormalRank").rsplit("#", 1)[-1], 0)
+
+
+def unpack_date(packed):
+    """"rank|time|precision|calendar" (one-row-per-item queries) -> date or None."""
+    parts = (packed or "").split("|")
+    if len(parts) != 4 or not rank_of(parts[0]):
+        return None
+    return parse_time(parts[1], parts[2], parts[3])
 
 
 def span(d):
-    """Year span covered by a date at its precision."""
+    """Year span covered by a date at its precision (astronomical years)."""
     y, _, _, p = d
     if p >= 9:
         return y, y
+    if y < 0:  # BC, not astronomical at these precisions: -300 is 300 BC
+        n = -y
+        if p == 8:  # "700s BC": 709-700 BC
+            return 1 - (n + 9), 1 - n
+        if p == 7:  # "3rd century BC": 300-201 BC
+            c = math.ceil(n / 100)
+            return 1 - c * 100, -(c - 1) * 100
+        if p == 6:
+            k = math.ceil(n / 1000)
+            return 1 - k * 1000, -(k - 1) * 1000
+        unit = 10 ** (9 - p)
+        return 1 - n - unit // 2, 1 - n + unit // 2
     if p == 8:
         s = (y // 10) * 10
         return s, s + 9
     if p == 7:  # century: 1800 -> 18th century (1701-1800)
-        c = math.ceil(y / 100) if y > 0 else math.floor((y - 1) / 100)
+        c = max(1, math.ceil(y / 100))
         return (c - 1) * 100 + 1, c * 100
     if p == 6:
-        k = math.ceil(y / 1000) if y > 0 else math.floor((y - 1) / 1000)
+        k = max(1, math.ceil(y / 1000))
         return (k - 1) * 1000 + 1, k * 1000
     unit = 10 ** (9 - p)
     return y - unit // 2, y + unit // 2
 
 
 def year_label(y):
-    return f"{1 - y} BC" if y <= 0 else str(y)
+    """Astronomical year -> "490 BC", "AD 79", "1066"."""
+    if y <= 0:
+        return f"{1 - y} BC"
+    return f"AD {y}" if y < 1000 else str(y)
 
 
 def ordinal(n):
@@ -218,34 +285,70 @@ def ordinal(n):
     return f"{n}{suf}"
 
 
-def date_label(d, end=None):
+def date_label(d):
     y, mo, day, p = d
     if p >= 11 and mo and day:
-        s = f"{day} {MONTHS[mo - 1]} {year_label(y)}"
-    elif p == 10 and mo:
-        s = f"{MONTHS[mo - 1]} {year_label(y)}"
-    elif p == 9:
-        s = year_label(y)
-    elif p == 8:
-        s = f"{year_label((y // 10) * 10)}s" if y > 0 else f"c. {year_label(y)}"
-    elif p == 7:
-        c = math.ceil(y / 100) if y > 0 else math.floor((y - 1) / 100)
-        s = f"{ordinal(c)} century" if c > 0 else f"{ordinal(-c)} century BC"
-    elif p == 6:
-        k = math.ceil(y / 1000) if y > 0 else math.floor((y - 1) / 1000)
-        s = f"{ordinal(k)} millennium" if k > 0 else f"{ordinal(-k)} millennium BC"
-    else:
-        s = f"c. {year_label(y)}"
-    if end and end[0] != y:
-        e = year_label(end[0])
-        if p >= 9 and end[3] >= 9:
-            s = f"{year_label(y)}–{e}"
-    return s
+        return f"{day} {MONTHS[mo - 1]} {year_label(y)}"
+    if p == 10 and mo:
+        return f"{MONTHS[mo - 1]} {year_label(y)}"
+    if p == 9:
+        return year_label(y)
+    if y < 0:  # BC at a coarse precision: -300 means 300 BC
+        n = -y
+        if p == 8:
+            return f"{n}s BC"
+        if p == 7:
+            return f"{ordinal(math.ceil(n / 100))} century BC"
+        if p == 6:
+            return f"{ordinal(math.ceil(n / 1000))} millennium BC"
+        return f"c. {n} BC"
+    if p == 8:
+        return f"{(y // 10) * 10}s"
+    if p == 7:
+        return f"{ordinal(max(1, math.ceil(y / 100)))} century"
+    if p == 6:
+        return f"{ordinal(max(1, math.ceil(y / 1000)))} millennium"
+    return f"c. {year_label(y)}"
+
+
+def range_label(a, b):
+    """Label for a span from date a to date b: "1939–1945", "490–479 BC",
+    "44 BC – AD 14", "6 Apr – 29 May 1453", "6–9 Aug 1945"."""
+    if b is None or a == b:
+        return date_label(a)
+    if a[3] < 9 or b[3] < 9:
+        la, lb = date_label(a), date_label(b)
+        return la if la == lb else f"{la} – {lb}"
+    ya, yb = a[0], b[0]
+    if ya == yb:
+        if a[3] >= 11 and b[3] >= 11 and a[1] and b[1]:
+            if a[1] == b[1]:
+                return a[2] == b[2] and date_label(a) or f"{a[2]}–{b[2]} {MONTHS[a[1] - 1]} {year_label(ya)}"
+            return f"{a[2]} {MONTHS[a[1] - 1]} – {b[2]} {MONTHS[b[1] - 1]} {year_label(ya)}"
+        if a[3] >= 10 and b[3] >= 10 and a[1] and b[1] and a[1] != b[1]:
+            return f"{MONTHS[a[1] - 1]}–{MONTHS[b[1] - 1]} {year_label(ya)}"
+        return year_label(ya)
+    if yb <= 0:
+        return f"{1 - ya}–{1 - yb} BC"
+    if ya <= 0:
+        return f"{1 - ya} BC – AD {yb}"
+    return f"{ya}–{yb}"
 
 
 def best(values):
-    """Pick the most precise date among several statements."""
-    return max(values, key=lambda d: d[3]) if values else None
+    """The date to use among several statements: preferred rank first, then
+    the most precise. values: [(rank, date)]."""
+    if not values:
+        return None
+    return max(values, key=lambda v: (v[0], v[1][3]))[1]
+
+
+def top_rank(values):
+    """Dates of the best rank present, earliest first."""
+    if not values:
+        return []
+    r = max(v[0] for v in values)
+    return sorted({v[1] for v in values if v[0] == r})
 
 
 def commons_path(url):
@@ -336,10 +439,17 @@ def main():
         return target in frontier
 
     election_classes = {c for c in parents if descends(c, "Q40231")} | {"Q40231"}
-    elections = {}
+    # Ships and aircraft are things, not events: the Titanic would show up in
+    # 1909, the year it was built (its sinking has its own article).
+    VEHICLES = {"Q11446", "Q1229765", "Q11436"}  # ship, watercraft, aircraft
+    vehicle_classes = {c for c in parents if any(descends(c, v) for v in VEHICLES)} | VEHICLES
+    elections, vehicles = {}, set()
     for r in read("classes"):
-        if r["cls"].rsplit("/", 1)[1] in election_classes:
+        c = r["cls"].rsplit("/", 1)[1]
+        if c in election_classes:
             elections[qid(r["item"])] = True
+        if c in vehicle_classes:
+            vehicles.add(qid(r["item"]))
 
     def item_role(i):
         """Role of an item. Exclusion only wins when it's clearly the closer
@@ -347,7 +457,14 @@ def main():
         when the item is directly an excluded class and nothing kept is (an
         award ceremony is also, one step up, a ceremony)."""
         keep, excl = best_keep.get(i), best_excl.get(i)
+        if i in vehicles:
+            return "exclude"
         if excl is not None and (keep is None or excl < keep[0] - 1 or (excl == 0 and keep[0] > 0)):
+            return "exclude"
+        # Culture and sports (festivals, contests, yearly editions) are weak
+        # matches: an exclusion as close wins (the 85th Academy Awards is an
+        # edition, a ceremony of the arts, and an award ceremony).
+        if excl is not None and excl <= keep[0] + {"culture": 0, "sports": 1}.get(keep[2], -99):
             return "exclude"
         return keep[2] if keep else None
 
@@ -358,75 +475,125 @@ def main():
             pt = parse_point(r["c"])
             if pt:
                 coords[i] = pt
-    # Events located through P276. A specific place (city, site) wins over
-    # vague ones (country, continent, ocean: centroids mean nothing). Events
-    # whose places are far apart are regional (pinned on their most central
-    # place) or, past WORLD_KM, worldwide (the world wars, the Cold War: listed
-    # and searchable, never pinned).
-    locs = defaultdict(dict)  # item -> location -> (point, vague, continent/ocean/region, capital)
+
+    # Capitals with their years, so a country maps to its capital of the time.
+    capitals = defaultdict(list)  # entity -> [(rank, point, from, to)]
+    for r in read("capitals"):
+        rk, pt = rank_of(r["rk"]), parse_point(r["c"])
+        if rk and pt:
+            capitals[r["country"]].append((rk, pt, year_of(r["s"]), year_of(r["e"])))
+
+    def capital_at(entity, year):
+        cs = capitals.get(entity)
+        if not cs:
+            return None
+        valid = [c for c in cs if (c[2] is None or c[2] <= year) and (c[3] is None or year <= c[3])]
+        if valid:
+            # The one in office then (a dated term beats an open-ended one).
+            return max(valid, key=lambda c: (c[2] is not None and c[3] is not None, c[0], c[2] or -99999))[1]
+        return max(cs, key=lambda c: (c[0], c[3] is None))[1]
+
+    # Locations from P276. Vague ones (countries, states, continents, oceans,
+    # seas, regions, or anything over VAGUE_AREA) aren't pinned on directly.
+    locs = defaultdict(dict)  # item -> location -> [point, vague, huge, has capital, label]
     for r in read("loccoords"):
         i = qid(r["item"])
         pt = parse_point(r["c"])
-        if i in items and pt:
-            _, vague, region, cap = locs[i].get(r["loc"], (0, False, False, None))
-            big = r["big"].rsplit("/", 1)[-1]
-            locs[i][r["loc"]] = (pt, vague or bool(r["cap"] or big), region or big in REGION_CLASSES,
-                                 cap or parse_point(r["capc"]))
-    loccoords = {}
-    spread_out = {}  # item -> (points, place label, fallback point, places to pin a regional event on)
-    for i, ls in locs.items():
-        specific = [pt for pt, vague, _, _ in ls.values() if not vague]
-        everywhere = [pt for pt, _, _, _ in ls.values()]
-        regions = sum(region for _, _, region, _ in ls.values())
-        if specific and spread(specific) <= LOCAL_KM and regions < 2:
-            loccoords[i] = specific[0]
-        elif len(everywhere) > 1 and spread(everywhere) > LOCAL_KM:
-            loccoords[i] = None
-            # Countries count by their capital; continents and oceans not at all.
-            pins = specific + [cap for _, vague, _, cap in ls.values() if vague and cap]
-            spread_out[i] = (everywhere, "", specific[0] if specific else None, pins)
-        else:
-            loccoords[i] = specific[0] if specific else None
-    del locs
-    # Events placed only by city/district.
+        if i not in items or not pt:
+            continue
+        big = r["big"].rsplit("/", 1)[-1]
+        try:
+            area = float(r["area"] or 0)
+        except ValueError:
+            area = 0
+        cur = locs[i].setdefault(r["loc"], [pt, False, False, False, r["label"] or ""])
+        cur[1] = cur[1] or bool(r["cap"] or big) or area > VAGUE_AREA
+        cur[2] = cur[2] or big in REGION_CLASSES or area > HUGE_AREA
+        cur[3] = cur[3] or bool(r["cap"])
+    p131 = {}  # events placed only by city or district
     for r in read("p131coords"):
         i = qid(r["item"])
-        if i not in items or i in loccoords:
-            continue
-        pt = None if r["cap"] else parse_point(r["c"])
-        if pt:
-            loccoords[i] = pt
-    # Events placed only by country: pinned at the capital, labelled with the
-    # country. Events spanning several countries (world wars...) are skipped.
-    countries = defaultdict(dict)  # item -> country -> (point, label)
+        try:
+            area = float(r.get("area") or 0)
+        except ValueError:
+            area = 0
+        # A district or city, not a state or province (by size, or by having a
+        # capital when the size is unknown).
+        if i in items and i not in p131 and not (area > VAGUE_AREA or not area and r["cap"]):
+            pt = parse_point(r["c"])
+            if pt:
+                p131[i] = pt
+    countries = defaultdict(dict)  # item -> country -> (centroid, label)
     for r in read("countrycoords"):
         i = qid(r["item"])
-        if i not in items or r["country"] in countries[i]:
-            continue
-        pt = parse_point(r["capc"]) or parse_point(r["cc"])
-        countries[i][r["country"]] = (pt, r["label"] or "")
-    nationwide = {}
-    for i, cs in countries.items():
-        pts = [pt for pt, _ in cs.values() if pt]
-        if len(cs) == 1 and pts:
-            nationwide[i] = (pts[0], next(iter(cs.values()))[1])
-        elif len(pts) > 1 and i not in spread_out and spread(pts) > LOCAL_KM:
-            labels = [label for _, label in cs.values()]
-            spread_out[i] = (pts, ", ".join(labels) if len(labels) <= 3 and all(labels) else "", None, pts)
-    del countries
+        if i in items and r["country"] not in countries[i]:
+            countries[i][r["country"]] = (parse_point(r["cc"]), r["label"] or "")
 
-    dates = defaultdict(lambda: defaultdict(list))
+    def locate(i, year):
+        """-> (point, place label, how) for an event. how is None for a real
+        place, "country" for a country's capital (notable events only), or
+        (points, labels) for an event spread over places far apart (notable
+        ones are pinned nowhere; point is then a specific place to fall back on)."""
+        if i in coords:
+            return coords[i], "", None
+        ls = locs.get(i)
+        if ls:
+            vals = list(ls.items())
+            specific = [v[0] for _, v in vals if not v[1]]
+            regions = sum(v[2] for _, v in vals)
+            if specific and spread(specific) <= LOCAL_KM and regions < 2:
+                return specific[0], "", None
+            # Countries count by their capital of the time, other places by their point.
+            pts = [(capital_at(loc, year) if v[3] else None) or v[0] for loc, v in vals]
+            labels = [v[4] for _, v in vals]
+            if len(vals) > 1 and spread(pts) > LOCAL_KM:
+                return (specific[0] if specific else None), "", (pts, labels)
+            if specific:
+                return specific[0], "", None
+            if len(vals) == 1 and vals[0][1][3] and not vals[0][1][2]:
+                # One country: its capital, labelled with the country.
+                loc, v = vals[0]
+                cap = capital_at(loc, year)
+                if cap:
+                    return cap, v[4], "country"
+            # Only regions, close together (Sinai, Golan, West Bank): the most
+            # central one, unless they are as big as a continent or a sea.
+            near = [q for (loc, v), q in zip(vals, pts) if not v[2]]
+            if near:
+                mid = centroid(near)
+                return min(near, key=lambda q: km(q, mid)), "", None
+            return None, "", (pts, labels)
+        if i in p131:
+            return p131[i], "", None
+        cs = countries.get(i)
+        if cs:
+            pts = [capital_at(c, year) or cc for c, (cc, _) in cs.items()]
+            labels = [label for _, label in cs.values()]
+            if any(pts) and (len(cs) == 1 or spread([q for q in pts if q]) <= LOCAL_KM):
+                return next(q for q in pts if q), ", ".join(l for l in labels[:3] if l), "country"
+            if len(cs) > 1 and all(pts):
+                return None, "", (pts, labels)
+        return None, "", None
+
+    # Events with several far-apart places.
+    def wide_label(pts, labels):
+        if len(labels) <= 3 and all(labels):
+            return ", ".join(labels)
+        return "Worldwide" if spread(pts) > WORLD_KM else ""
+
+    dates = defaultdict(lambda: defaultdict(list))  # item -> property -> [(rank, date)]
     for prop in ["P585", "P580", "P582", "P571", "P576", "P1619"]:
         for r in read(f"date_{prop}"):
             i = qid(r["item"])
-            if i in items:
-                d = parse_time(r["t"], r["prec"])
+            rk = rank_of(r["rk"])
+            if i in items and rk:
+                d = parse_time(r["t"], r["prec"], r["cal"])
                 if d:
-                    dates[i][prop].append(d)
+                    dates[i][prop].append((rk, d))
 
     print("classifying…")
     happenings = []
-    worldwide_recs = []  # no single place: searchable, listed, never pinned
+    worldwide_recs = []  # no single place: listed and searchable, never pinned
     standing = []
     stats = Counter()
 
@@ -437,9 +604,21 @@ def main():
             continue
         ds = dates.get(i, {})
         cat = role if role in EVENT_ROLES else None
+        p580, p582 = best(ds.get("P580")), best(ds.get("P582"))
+        pits = top_rank(ds.get("P585"))
         pit_d = best(ds.get("P585"))
-        start_d = best(ds.get("P580")) or pit_d
-        end_d = best(ds.get("P582")) or pit_d
+        # A decade- or century-level date says less than a precise one: when a
+        # precise date says the same thing, the vague one doesn't stretch the span.
+        precise = lambda d: d is not None and d[3] >= 9
+        if precise(pit_d) or precise(p580) and precise(p582):
+            p580 = p580 if precise(p580) else None
+            p582 = p582 if precise(p582) else None
+            pit_d = pit_d if precise(pit_d) else None
+            pits = [d for d in pits if d[3] >= 9]
+        elif pit_d and (precise(p580) or precise(p582)):
+            pit_d, pits = None, []
+        start_d = p580 or pit_d
+        end_d = p582 or pit_d
         found_d = best(ds.get("P571")) or best(ds.get("P1619"))
         is_place = role in PLACE_ROLES or (cat is None and found_d is not None)
         sl = it["sl"]
@@ -448,60 +627,60 @@ def main():
 
         if not is_place:
             if cat is None and role is None:
-                cat = guess_cat(it["title"], it.get("desc", ""))
+                cat = guess_cat(it["title"])
                 if cat:
                     stats[f"guessed:{cat}"] += 1
             if start_d is None:
                 stats["no_date"] += 1
                 continue
-            pt = coords.get(i) or loccoords.get(i)
-            place = ""
+            # Several dates a few days apart (Hiroshima, then Nagasaki): a range.
+            # Further apart they are more likely rival datings: keep the best one.
+            if not p580 and not p582 and len(pits) > 1 and all(d[3] >= 11 for d in pits) \
+                    and pits[-1][0] == pits[0][0] and day_of_year(pits[-1]) - day_of_year(pits[0]) <= 10:
+                start_d, end_d = pits[0], pits[-1]
+            pt, place, how = locate(i, span(start_d)[0])
+            notable = cat != "sports"  # unclassified events show as politics
             worldwide = False
-            if not pt and i in spread_out:
-                pts, place, pt, pins = spread_out[i]  # pt: a specific place to fall back on
-                if not (cat and cat != "sports" and sl >= WORLDWIDE_MIN_SITELINKS):
-                    place = ""
-                elif spread(pts) > WORLD_KM:
-                    pt = centroid(pts)
-                    place = place or "Worldwide"
-                    worldwide = True
-                    stats["event:worldwide"] += 1
-                elif pins:
-                    # A regional event: pinned on whichever of its places is most central.
-                    mid = centroid(pts)
-                    pt = min(pins, key=lambda q: km(q, mid))
-                    stats["event:regional"] += 1
+            if how == "country":
+                # Known only by country: the capital, for events notable enough
+                # (elections would crowd every capital).
+                if notable and sl >= NATIONWIDE_MIN_SITELINKS and not elections.get(i):
+                    stats["event:nationwide"] += 1
                 else:
-                    pt = None
-            elif not pt and i in nationwide and cat and cat != "sports" and sl >= NATIONWIDE_MIN_SITELINKS \
-                    and not elections.get(i):
-                (pt, place) = nationwide[i]
-                stats["event:nationwide"] += 1
+                    pt, place = None, ""
+            elif how:
+                if notable and sl >= WORLDWIDE_MIN_SITELINKS:
+                    # Spread over places far apart: no pin, listed while in view.
+                    place, pt, worldwide = wide_label(*how), centroid(how[0]), True
+                    stats["event:wide"] += 1
+                else:
+                    place = ""  # a minor one keeps a specific place, if it has one
             if not pt:
                 stats["event_nocoord"] += 1
                 continue
             if cat == "sports" and sl < SPORTS_MIN_SITELINKS:
                 stats["sports_dropped"] += 1
                 continue
-            spans = [span(d) for d in (start_d, end_d, pit_d) if d]
+            spans = [span(d) for d in (start_d, end_d) if d]
             start, end = min(x[0] for x in spans), max(x[1] for x in spans)
             if end - start > 2000 or start > MAX_YEAR:
                 stats["bad_span"] += 1
                 continue
-            # Multi-year events read as their span ("1789-1799"); otherwise the
-            # most precise single date.
-            ranged = start_d and end_d and best(ds.get("P580")) and best(ds.get("P582")) and end_d[0] != start_d[0]
-            if pit_d and pit_d[3] >= 10 and not ranged:
-                label = date_label(pit_d)
+            # A stated span reads as one ("1789–1799", "6 Apr – 29 May 1453");
+            # otherwise the most precise single date.
+            if end_d and start_d != end_d and (p580 and p582 or start_d[3] >= 11):
+                label = range_label(*sorted((start_d, end_d)))
             else:
-                first = min((d for d in (start_d, end_d) if d), key=lambda d: d[0])
-                last = max((d for d in (start_d, end_d) if d), key=lambda d: d[0])
-                label = date_label(first, last)
+                label = date_label(pit_d or start_d)
             disp = "culture" if cat in ("culture", "sports") else (cat or "politics")
             score = sl * WEIGHT[cat or "event"] * bonus
             rec = [i, it["title"], pt[0], pt[1], start, end, CAT[disp], EVENT,
                    round(score, 1), img, it.get("desc", ""), label, place]
-            (worldwide_recs if worldwide else happenings).append(rec)
+            if worldwide:
+                rec.append([[round(q[0], 2), round(q[1], 2)] for q in dict.fromkeys(how[0])])
+                worldwide_recs.append(rec)
+            else:
+                happenings.append(rec)
             stats[f"event:{cat}"] += 1
             continue
 
@@ -534,17 +713,18 @@ def main():
             standing.append(rec[:5] + [end] + rec[6:])
         stats[f"place:{role}"] += 1
 
-    print("people, premieres, discoveries…")
+    print("people, premieres, discoveries, launches…")
     found = set()
     for kind_name, kind, cat, weight in (
         ("births", BORN, "people", "born"),
         ("deaths", DIED, "people", "died"),
         ("premieres", PREMIERED, "culture", "premiere"),
         ("discoveries", DISCOVERED, "science", "discovery"),
+        ("launches", LAUNCHED, "science", "launch"),
     ):
         for r in read(kind_name):
             pt = parse_point(r["c"])
-            d = parse_time(r["t"], r["prec"])
+            d = unpack_date(r["date"])
             if not pt or not d or r["title"].startswith("List of"):
                 continue
             if r.get("cap"):
@@ -560,7 +740,7 @@ def main():
             img = commons_path(r["image"])
             score = round(sl * WEIGHT[weight] * (IMAGE_BONUS if img else 1), 1)
             i = qid(r["item"])
-            if kind in (PREMIERED, DISCOVERED):
+            if kind in (PREMIERED, DISCOVERED, LAUNCHED):
                 found.add(i)
             happenings.append([i, r["title"], pt[0], pt[1], s0, s1, CAT[cat], kind,
                                score, img, clean_desc(r["desc"]), date_label(d), r["placeLabel"] or ""])
@@ -678,10 +858,14 @@ def write(happenings, standing, worldwide):
     assign_minzoom([r for r in long_ if happened(r)], lambda r: 0)
     assign_minzoom([r for r in long_ if not happened(r)], lambda r: 0, LOD_K_OTHER, LOD_OTHER_OFFSET)
 
+    # Long happenings: the few that show zoomed out come with the first view;
+    # the rest is an ordinary file, loaded from zoom 4.
     long_.sort(key=lambda r: -r[8])
-    total += dump(os.path.join(OUT, "long.json"), long_)
-    for r in long_:
-        loc[id(r)] = "long"
+    for name, recs in (("long", [r for r in long_ if r[13] <= TIERS[0][2]]),
+                       ("long-2", [r for r in long_ if r[13] > TIERS[0][2]])):
+        total += dump(os.path.join(OUT, f"{name}.json"), recs)
+        for r in recs:
+            loc[id(r)] = name
 
     tiers = {}
     for name, zmin, zmax, gz, size in TIERS:
@@ -697,7 +881,9 @@ def write(happenings, standing, worldwide):
                 chunk.sort(key=lambda r: -r[8])
                 path = f"{name}/{x}-{y}-{i}"
                 total += dump(os.path.join(OUT, path + ".json"), chunk)
-                entries.append([chunk_min(chunk), max(r[4] for r in chunk), len(chunk)])
+                # [first start, last start, count, last end]: lets the app skip
+                # chunks that end before its window.
+                entries.append([chunk_min(chunk), max(r[4] for r in chunk), len(chunk), max(r[5] for r in chunk)])
                 for r in chunk:
                     loc[id(r)] = path
             tiles[f"{x}-{y}"] = entries
@@ -713,9 +899,12 @@ def write(happenings, standing, worldwide):
         total += dump(os.path.join(OUT, "d", f"{key}.json"), recs)
         detail.append([key, *bbox, len(recs)])
         for r in recs:
-            loc[id(r)] = f"d/{key}"
+            loc[id(r)] = f"d/{key}"  # search opens results zoomed in, where these load
 
-    deep = [r for r in short if r[13] > TIERS[-1][2]]
+    # Zoomed into a city the app reads only the world tier and these leaves, so
+    # they also carry what the coarser b/c tiers hold (a b or c file covers far
+    # more than a city: most of it would be wasted bytes).
+    deep = [r for r in short if r[13] > TIERS[0][2]]
     quadtree(deep, DETAIL_MAX, write_detail)
     print(f"  tier d: {len(detail)} files, {len(deep)} records")
 
@@ -732,10 +921,11 @@ def write(happenings, standing, worldwide):
     quadtree(standing, TILE_MAX, write_places)
     print(f"  standing: {len(places)} files, {len(standing)} records")
 
-    # Events with no one place: a small file the app keeps whole.
+    # Events with no one place: a small file the app keeps whole. Layout as
+    # other happenings (minzoom 0), plus the event's places at the end.
     worldwide.sort(key=lambda r: -r[8])
     for r in worldwide:
-        r.append(0)
+        r.insert(13, 0)
         loc[id(r)] = "world"
     total += dump(os.path.join(OUT, "world.json"), worldwide)
     print(f"  worldwide: {len(worldwide)} records")
@@ -750,6 +940,12 @@ def write(happenings, standing, worldwide):
     # Search index: the most notable items, with the file holding each. Places
     # whose founding is only known roughly ("4th century BC") are in no
     # happening file, so the notable ones come from the standing layer.
+    # Rows: [id, title, start, end, cat, kind, file, label]; the label is the
+    # founding date of a place ("3rd century BC") or a worldwide event's places.
+    def row(r, end):
+        label = r[11] if r[7] in (BUILT, FOUNDED, ESTABLISHED) else r[12] if loc[id(r)] == "world" else ""
+        return [r[0], r[1], r[4], end, r[6], r[7], loc[id(r)]] + ([label] if label else [])
+
     seen = set()
     search = []
     cutoff = 0
@@ -757,17 +953,19 @@ def write(happenings, standing, worldwide):
         if r[0] in seen:
             continue
         seen.add(r[0])
-        search.append([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], loc[id(r)]])
+        search.append(row(r, r[5]))
         if len(search) >= SEARCH_MAX:
             cutoff = r[8]
             break
     extra = [r for r in standing if r[0] not in seen and r[8] >= max(cutoff, SEARCH_MIN_PLACE_SCORE)]
     for r in sorted(extra, key=lambda r: -r[8])[:SEARCH_MAX_PLACES]:
-        search.append([r[0], r[1], r[2], r[3], r[4], r[4], r[6], r[7], loc[id(r)]])
+        search.append(row(r, r[4]))
     # Most notable first: the app ranks ties by position.
     score = {r[0]: r[8] for r in happenings + worldwide + standing}
     search.sort(key=lambda e: -score[e[0]])
-    total += dump(os.path.join(OUT, "search.json"), search)
+    # Two parts: the most notable answer most searches and arrive first.
+    total += dump(os.path.join(OUT, "search.json"), search[:SEARCH_FIRST])
+    total += dump(os.path.join(OUT, "search-2.json"), search[SEARCH_FIRST:])
 
     index = {
         "version": _digest.hexdigest()[:10],
@@ -775,6 +973,9 @@ def write(happenings, standing, worldwide):
         "longSpan": LONG_SPAN,
         "tiers": tiers,
         "detailMinz": TIERS[-1][2] + 1,
+        "leavesHoldAll": True,  # detail leaves also carry the b/c tiers' records
+        "longDetail": True,  # long happenings past zoom 3 are in long-2.json
+        "searchParts": 2,  # search.json, then search-2.json
         "detail": detail,
         "standing": places,
         "counts": {"happenings": len(happenings), "standing": len(standing)},

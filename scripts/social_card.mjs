@@ -24,7 +24,9 @@ const ctx = await browser.newContext({
 const page = await ctx.newPage();
 await page.goto(`${site}#y=1815&w=5&m=49.2,10.5,4.15&a=48314`, { waitUntil: 'load' });
 await page.waitForTimeout(6000);
-await page.evaluate(() => document.querySelector('#opt-borders').click());
+// Historical borders are on by default in 1815. The attribution stays in the
+// app; the card has no room for its button.
+await page.addStyleTag({ content: '.maplibregl-ctrl-attrib { display: none !important; }' });
 await page.mouse.move(5, 625); // no hover card
 await page.waitForTimeout(9000);
 await page.screenshot({ path: path.join(root, 'og.jpg'), type: 'jpeg', quality: 86 });

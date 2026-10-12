@@ -15,7 +15,10 @@ export const BASEMAP_MAX_ZOOM = 6; // must match MAX_ZOOM in scripts/build_basem
 const COARSE_LAND_UNTIL = 7.5;
 const OFM_FONTS = 'https://tiles.openfreemap.org/fonts/';
 // Glyph ranges shipped in basemap/fonts (everything else comes from OpenFreeMap).
-const LOCAL_GLYPHS = { 'Noto Sans Regular': ['0-255', '256-511', '8192-8447'] };
+const LOCAL_GLYPHS = {
+  'Noto Sans Regular': ['0-255', '256-511', '8192-8447'],
+  'Noto Sans Italic': ['0-255', '256-511', '8192-8447'], // historical border labels (folded to these ranges)
+};
 const FONT = ['Noto Sans Regular'];
 
 const PALETTES = {

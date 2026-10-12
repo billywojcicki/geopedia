@@ -18,6 +18,7 @@ ROOTS = {
         "Q645883",  # military operation
         "Q831663",  # military campaign
         "Q180684",  # conflict
+        "Q21480300",  # mass shooting (not a disaster)
         "Q13427116",  # peasant revolt (otherwise a riot, one step closer)
         "Q1323212",  # insurgency
         "Q350604",  # armed conflict
@@ -49,6 +50,8 @@ ROOTS = {
         "Q29102902",  # papal election
         "Q40231",  # public election
         "Q132821",  # murder
+        "Q2334719",  # legal case (Wikidata files it under "conflict")
+        "Q8016240",  # trial
         "Q16738832",  # criminal case
         "Q2761147",  # meeting
         "Q209715",  # coronation
@@ -121,6 +124,8 @@ ROOTS = {
         "Q1060829",  # broadcaster
         "Q1573906",  # concert tour
         "Q3887",  # solar eclipse
+        "Q3464665",  # television series season
+        "Q21191270",  # television series episode
         "Q220397",  # saros (eclipse series)
         "Q14350",  # radio station
         "Q1616075",  # television station

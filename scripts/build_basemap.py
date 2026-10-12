@@ -30,7 +30,7 @@ UA = "GeopediaBuild/0.1 (https://github.com/billywojcicki/geopedia)"
 NE = "https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@v5.1.2/geojson/{}.geojson"
 STYLE = "https://tiles.openfreemap.org/styles/positron"
 FONTS = "https://tiles.openfreemap.org/fonts/{}/{}.pbf"
-FONT_STACKS = ["Noto Sans Regular"]  # the zoomed-out labels use one font: one download
+FONT_STACKS = ["Noto Sans Regular", "Noto Sans Italic"]  # labels; italic is for historical borders
 FONT_RANGES = ["0-255", "256-511", "8192-8447"]  # Latin-1, Latin Extended-A, punctuation
 MAPLIBRE = "maplibre-gl@5.24.0"
 

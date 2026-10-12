@@ -56,6 +56,8 @@ export class Timeline {
       const p = clamp(yearToPos(this.year) + acc / (w * 6), 0, 1);
       const y = Math.round(posToYear(p));
       if (y !== this.year) { acc = 0; this.onInput(clamp(y, MIN_YEAR, MAX_YEAR), false); }
+      // At either end the wheel can't move further: don't let it wind up.
+      else if ((p === 0 && acc < 0) || (p === 1 && acc > 0)) acc = 0;
     }, { passive: false });
   }
 

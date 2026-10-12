@@ -13,6 +13,7 @@ Usage: python3 scripts/build_borders.py
 """
 import json
 import os
+import unicodedata
 
 from build_basemap import ROOT, dump, get, label_point, ring_area, simplify
 
@@ -34,6 +35,23 @@ MIN_AREA = 0.002  # square degrees; smaller islands are dropped
 
 def key(y):
     return f"bc{-y}" if y < 0 else str(y)
+
+
+def fold(label):
+    """Keep labels within the glyph ranges the site ships (Latin, Latin
+    Extended-A, general punctuation): "Đại Việt" -> "Đai Viêt" -> ..."""
+    out = []
+    for ch in label:
+        o = ord(ch)
+        if o < 0x200 or 0x2000 <= o < 0x2100:
+            out.append(ch)
+            continue
+        if ch in "ʻʼʿʾ":
+            out.append("'")
+            continue
+        base = "".join(c for c in unicodedata.normalize("NFD", ch) if not unicodedata.combining(c))
+        out.append(base if base and all(ord(c) < 0x200 for c in base) else "")
+    return "".join(out)
 
 
 def hue(name):
@@ -72,21 +90,25 @@ def geometry(g):
 def build(y):
     name = f"world_{key(y)}.geojson"
     src = json.loads(get(SOURCE.format(name), os.path.join(CACHE, name)))
-    shapes, labels = [], []
+    shapes, labels = [], {}
     for f in src["features"]:
         p = f.get("properties") or {}
-        label = p.get("NAME") or p.get("SUBJECTO") or ""
+        label = fold(p.get("NAME") or p.get("SUBJECTO") or "")
         g = geometry(f.get("geometry"))
         if not label or not g:
             continue
         shapes.append({"type": "Feature", "geometry": g, "properties": {"label": label, "h": hue(p.get("SUBJECTO") or label)}})
         polys = g["coordinates"] if g["type"] == "MultiPolygon" else [g["coordinates"]]
         area = max(ring_area(poly[0]) for poly in polys)
+        # One label per name (a polity can come as several features: Prussia's
+        # exclaves, Fiji's islands), on its largest piece.
+        if label in labels and labels[label]["properties"]["area"] >= area:
+            continue
         x, yy = label_point(g)
-        labels.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(x, 3), round(yy, 3)]},
-                       "properties": {"label": label, "area": round(area, 2)}})
+        labels[label] = {"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(x, 3), round(yy, 3)]},
+                         "properties": {"label": label, "area": round(area, 2)}}
     # Bigger polities claim their label spot first.
-    labels.sort(key=lambda f: -f["properties"]["area"])
+    labels = sorted(labels.values(), key=lambda f: -f["properties"]["area"])
     n = dump(os.path.join(OUT, f"{key(y)}.geojson"), {"type": "FeatureCollection", "features": shapes})
     n += dump(os.path.join(OUT, f"{key(y)}.labels.geojson"), {"type": "FeatureCollection", "features": labels})
     return n

@@ -23,8 +23,26 @@ PREFIX wikibase: <http://wikiba.se/ontology#>
 PREFIX schema: <http://schema.org/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX p: <http://www.wikidata.org/prop/>
+PREFIX ps: <http://www.wikidata.org/prop/statement/>
 PREFIX psv: <http://www.wikidata.org/prop/statement/value/>
+PREFIX psn: <http://www.wikidata.org/prop/statement/value-normalized/>
+PREFIX pq: <http://www.wikidata.org/prop/qualifier/>
 """
+
+# A date statement's value, precision, calendar (the RDF export converts
+# Julian dates to Gregorian; the build converts them back for display) and
+# rank (the build drops deprecated statements and prefers preferred ones; a
+# FILTER on the rank here makes QLever silently drop most rows).
+def dated(prop, var="st"):
+    return f"""?item p:{prop} ?{var} . ?{var} wikibase:rank ?rk ;
+    psv:{prop} [ wikibase:timeValue ?tv ; wikibase:timePrecision ?pr ; wikibase:timeCalendarModel ?cal ] ."""
+
+# For one-row-per-item queries: one statement's date packed as
+# "rank|time|precision|calendar" so the parts stay together. MAX picks the
+# preferred statement first (rank IRIs sort Preferred > Normal > Deprecated).
+# QLever wants the expression bound before it is aggregated.
+PACKED_DATE = "(MAX(?packed) AS ?date)"
+PACK = """BIND(CONCAT(STR(?rk), "|", STR(?tv), "|", STR(?pr), "|", STR(?cal)) AS ?packed)"""
 
 ENWIKI = "?article schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> ."
 
@@ -41,6 +59,21 @@ CANDIDATE = """
   }
 """
 EVENT_DATE = "{ ?item wdt:P585 [] } UNION { ?item wdt:P580 [] }"
+
+# Location classes too vague to pin an event on: countries, states, continents,
+# oceans, seas, regions, peninsulas, rivers, mountain ranges... (big areas are
+# also caught by their size in the build).
+BIG_CLASSES = " ".join("wd:" + q for q in [
+    "Q6256", "Q3624078", "Q5107", "Q9430", "Q165", "Q3024240", "Q35657", "Q107390", "Q10864048",
+    "Q1620908", "Q82794", "Q2221906", "Q3502482", "Q34763", "Q4022", "Q46831", "Q1322134",
+    "Q1973404", "Q166620", "Q399984", "Q1969448", "Q4588528", "Q137186904", "Q15642541", "Q209495",
+])
+# Where someone was born or a work premiered: only countries, states,
+# continents and oceans are too vague ("historical region" also covers
+# Königsberg, the city).
+COUNTRY_CLASSES = " ".join("wd:" + q for q in [
+    "Q6256", "Q3624078", "Q5107", "Q9430", "Q165", "Q3024240", "Q35657", "Q107390", "Q10864048",
+])
 
 # Minimum sitelinks for people (births/deaths) to keep the set focused.
 PEOPLE_MIN_SITELINKS = 25
@@ -69,23 +102,35 @@ SELECT DISTINCT ?item ?c WHERE {{
     # Events located only through P276. ?cap/?big flag locations that are
     # countries, states, oceans etc. (their coordinate is a meaningless centroid).
     "loccoords": f"""
-SELECT DISTINCT ?item ?loc ?c ?cap ?capc ?big WHERE {{
+SELECT DISTINCT ?item ?loc ?label ?c ?cap ?capc ?big ?area WHERE {{
   {ENWIKI}
   {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }}
   ?item wdt:P276 ?loc . ?loc wdt:P625 ?c .
   FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
   OPTIONAL {{ ?loc wdt:P36 ?cap OPTIONAL {{ ?cap wdt:P625 ?capc }} }}
-  OPTIONAL {{ ?loc wdt:P31 ?big VALUES ?big {{ wd:Q6256 wd:Q3624078 wd:Q5107 wd:Q9430 wd:Q165 wd:Q3024240 wd:Q35657 wd:Q107390 wd:Q10864048 wd:Q1620908 wd:Q82794 wd:Q2221906 }} }}
+  OPTIONAL {{ ?loc wdt:P31 ?big VALUES ?big {{ {BIG_CLASSES} }} }}
+  OPTIONAL {{ ?loc p:P2046/psn:P2046/wikibase:quantityAmount ?area }}
+  OPTIONAL {{ ?loc rdfs:label ?label FILTER(LANG(?label) = "en") }}
 }}""",
+    # Capitals with their validity, so a country maps to its capital of the
+    # time (Ottoman Empire: Bursa, Edirne, then Constantinople).
+    "capitals": """
+SELECT DISTINCT ?country ?cap ?c ?s ?e ?rk WHERE {
+  ?country p:P36 ?st . ?st ps:P36 ?cap ; wikibase:rank ?rk .
+  ?cap wdt:P625 ?c .
+  OPTIONAL { ?st pq:P580 ?s }
+  OPTIONAL { ?st pq:P582 ?e }
+}""",
     # Events located only through P131 (city, district...). ?cap flags regions
     # with a capital (states, provinces): too vague to pin.
     "p131coords": f"""
-SELECT DISTINCT ?item ?loc ?c ?cap WHERE {{
+SELECT DISTINCT ?item ?loc ?c ?cap ?area WHERE {{
   {ENWIKI}
   {EVENT_DATE}
   ?item wdt:P131 ?loc . ?loc wdt:P625 ?c .
   FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
   OPTIONAL {{ ?loc wdt:P36 ?cap }}
+  OPTIONAL {{ ?loc p:P2046/psn:P2046/wikibase:quantityAmount ?area }}
 }}""",
     # Country of each dated event without its own coordinates: the build pins
     # nationwide events (revolutions, famines, reforms) at the capital.
@@ -118,44 +163,49 @@ SELECT DISTINCT ?a ?b WHERE {{
 
 for prop in ["P585", "P580", "P582", "P571", "P576", "P1619"]:
     QUERIES[f"date_{prop}"] = f"""
-SELECT ?item ?t ?prec WHERE {{
+SELECT ?item (?tv AS ?t) (?pr AS ?prec) ?cal ?rk WHERE {{
   {ENWIKI}
   {CANDIDATE}
-  ?item p:{prop}/psv:{prop} [ wikibase:timeValue ?t ; wikibase:timePrecision ?prec ] .
+  {dated(prop)}
 }}"""
 
 for kind, place_prop, date_prop in [("births", "P19", "P569"), ("deaths", "P20", "P570")]:
     QUERIES[kind] = f"""
-SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) (SAMPLE(?tv) AS ?t) (SAMPLE(?pr) AS ?prec)
-       (SAMPLE(?pl) AS ?place) (SAMPLE(?pll) AS ?placeLabel) (SAMPLE(?co) AS ?c)
+SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) {PACKED_DATE}
+       (SAMPLE(?pl) AS ?place) (SAMPLE(?pll) AS ?placeLabel) (SAMPLE(?co) AS ?c) (SAMPLE(?cp) AS ?cap)
        (SAMPLE(?img) AS ?image) (SAMPLE(?d) AS ?desc) WHERE {{
   ?item wdt:P31 wd:Q5 ; wikibase:sitelinks ?s .
-  FILTER(?s >= {PEOPLE_MIN_SITELINKS})
   {ENWIKI} ?article schema:name ?ti .
-  ?item p:{date_prop}/psv:{date_prop} [ wikibase:timeValue ?tv ; wikibase:timePrecision ?pr ] .
+  {dated(date_prop)}
+  {PACK}
   ?item wdt:{place_prop} ?pl . ?pl wdt:P625 ?co .
+  OPTIONAL {{ ?pl wdt:P31 ?cp VALUES ?cp {{ {COUNTRY_CLASSES} }} }}  # a country or state: too vague
   OPTIONAL {{ ?pl rdfs:label ?pll FILTER(LANG(?pll) = "en") }}
   OPTIONAL {{ ?item wdt:P18 ?img }}
   OPTIONAL {{ ?item schema:description ?d FILTER(LANG(?d) = "en") }}
-}} GROUP BY ?item"""
+}} GROUP BY ?item HAVING (MAX(?s) >= {PEOPLE_MIN_SITELINKS})"""
+# (A FILTER on the sitelinks here makes QLever return nothing, at random.)
 
 
-# Works first performed at a known venue (operas, ballets, plays, symphonies)
-# and objects found at a known place (hoards, fossils, manuscripts).
-for kind, date_prop, place_prop in [("premieres", "P1191", "P4647"), ("discoveries", "P575", "P189")]:
+# Works first performed at a known venue (operas, ballets, plays, symphonies),
+# objects found at a known place (hoards, fossils, manuscripts) and
+# spacecraft launched from a known site (Sputnik 1, Apollo 11).
+for kind, date_prop, place_prop in [("premieres", "P1191", "P4647"), ("discoveries", "P575", "P189"),
+                                    ("launches", "P619", "P1427")]:  # P1427: start point (launch pad)
     QUERIES[kind] = f"""
-SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) (SAMPLE(?tv) AS ?t) (SAMPLE(?pr) AS ?prec)
+SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) {PACKED_DATE}
        (SAMPLE(?pl) AS ?place) (SAMPLE(?pll) AS ?placeLabel) (SAMPLE(?co) AS ?c) (SAMPLE(?cp) AS ?cap)
        (SAMPLE(?img) AS ?image) (SAMPLE(?d) AS ?desc) WHERE {{
   ?item wikibase:sitelinks ?s .
   {ENWIKI} ?article schema:name ?ti .
-  ?item p:{date_prop}/psv:{date_prop} [ wikibase:timeValue ?tv ; wikibase:timePrecision ?pr ] .
+  {dated(date_prop)}
+  {PACK}
   ?item wdt:{place_prop} ?pl . ?pl wdt:P625 ?co .
-  OPTIONAL {{ ?pl wdt:P36 ?cp }}
+  OPTIONAL {{ ?pl wdt:P31 ?cp VALUES ?cp {{ {COUNTRY_CLASSES} }} }}  # a country or state: too vague
   OPTIONAL {{ ?pl rdfs:label ?pll FILTER(LANG(?pll) = "en") }}
   OPTIONAL {{ ?item wdt:P18 ?img }}
   OPTIONAL {{ ?item schema:description ?d FILTER(LANG(?d) = "en") }}
-}} GROUP BY ?item"""
+}} GROUP BY ?item{" HAVING (MAX(?s) >= 10)" if kind == "launches" else ""}"""
 
 
 def run(name, query, force=False):
@@ -184,7 +234,7 @@ def run(name, query, force=False):
             return
         except Exception as e:  # network hiccups, 5xx
             print(f"[err]  {name}: {e} (attempt {attempt + 1})")
-            time.sleep(2 ** (attempt + 1))
+            time.sleep(15 * 2 ** attempt)
     raise SystemExit(f"failed: {name}")
 
 
@@ -192,10 +242,14 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     force = "--force" in sys.argv
     os.makedirs(RAW, exist_ok=True)
+    ran = False
     for name, q in QUERIES.items():
         if args and name not in args:
             continue
+        if ran:
+            time.sleep(20)  # QLever rate-limits bursts
         run(name, q, force)
+        ran = True
 
 
 if __name__ == "__main__":
