@@ -121,6 +121,7 @@ ROOTS = {
         "Q1060829",  # broadcaster
         "Q1573906",  # concert tour
         "Q3887",  # solar eclipse
+        "Q220397",  # saros (eclipse series)
         "Q14350",  # radio station
         "Q1616075",  # television station
         "Q27971968",  # constituency of the House of Commons

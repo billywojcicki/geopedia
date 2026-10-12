@@ -69,12 +69,12 @@ SELECT DISTINCT ?item ?c WHERE {{
     # Events located only through P276. ?cap/?big flag locations that are
     # countries, states, oceans etc. (their coordinate is a meaningless centroid).
     "loccoords": f"""
-SELECT DISTINCT ?item ?loc ?c ?cap ?big WHERE {{
+SELECT DISTINCT ?item ?loc ?c ?cap ?capc ?big WHERE {{
   {ENWIKI}
   {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }}
   ?item wdt:P276 ?loc . ?loc wdt:P625 ?c .
   FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
-  OPTIONAL {{ ?loc wdt:P36 ?cap }}
+  OPTIONAL {{ ?loc wdt:P36 ?cap OPTIONAL {{ ?cap wdt:P625 ?capc }} }}
   OPTIONAL {{ ?loc wdt:P31 ?big VALUES ?big {{ wd:Q6256 wd:Q3624078 wd:Q5107 wd:Q9430 wd:Q165 wd:Q3024240 wd:Q35657 wd:Q107390 wd:Q10864048 wd:Q1620908 wd:Q82794 wd:Q2221906 }} }}
 }}""",
     # Events located only through P131 (city, district...). ?cap flags regions

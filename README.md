@@ -34,6 +34,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 | File | What it does |
 | --- | --- |
 | `js/app.js` | State, map layers, sidebar list, article panel, search, URL state |
+| `js/search.js` | Search ranking |
 | `js/data.js` | Works out which data files a view needs and loads them |
 | `js/pins.js` | Greedy screen-space placement of labelled photo pins |
 | `js/sheet.js` | Phone bottom sheet: snap points, drag with momentum |
@@ -112,7 +113,7 @@ Full Wikipedia text is tens of GB, so the static part is an index (title, place,
 
 **What's on the map.** Events are the point; places and people are the backdrop.
 
-1. **Events** with a date (`point in time`, or `start`/`end time`) and a place. The place is, in order: the event's own coordinates; its `location` if that's a city or site; its `located in` (P131) district or city. Notable events (10+ language editions) known only by country, like reforms, crises and revolutions, are pinned on that country's capital and labelled with the country. National elections are left out of that fallback (they'd crowd every capital). About 38k.
+1. **Events** with a date (`point in time`, or `start`/`end time`) and a place. The place is, in order: the event's own coordinates; its `location` if that's a city or site; its `located in` (P131) district or city. Notable events (10+ language editions) known only by country, like reforms, crises and revolutions, are pinned on that country's capital and labelled with the country. National elections are left out of that fallback (they'd crowd every capital). Events whose places are far apart are pinned on their most central place (countries count by their capital), or, past 5,000 km, are **worldwide**: the world wars, the Cold War, the Holocaust, the Black Death and about 20 more have no pin. They're listed under the heading of the years they cover, are searchable, and opening one shows the whole world. About 38k.
 2. **Premieres and discoveries**: operas, plays and ballets at the theatre where they premiered, and scientific discoveries where they were made (not chemical elements "discovered in Sweden"). About 3.4k.
 3. **Places** with a founding date (`inception` or `opening date`): buildings, towns, institutions, historical states. They appear as a "Built / Founded / Established" event in their year, and when zoomed in they also appear (in grey) for every year they existed, until `dissolved/demolished` if known. About 250k.
 4. **People** with 25+ Wikipedia language editions: births and deaths at the birth/death place. About 80k. Off by default.
@@ -153,6 +154,8 @@ Premieres and discoveries count at most 60 language editions, so a famous opera 
 **Zoom.** Pins are placed greedily in priority order and skipped if they'd overlap one already placed, so the most notable things win at world scale and local ones appear as you zoom in. Buildings, foundings, people and standing places get at most a third of the labels on screen, so events lead even in a city. Small dots show the rest of what is loaded for that zoom and window.
 
 The data tiles have their own budget per zoom: each 512px tile keeps its 8 most notable events per time slice, but only its 2 most notable places and people, and those only from 2 zoom levels deeper. At world zoom (z0-3) that's about 22k events, 2.7k places and 1.8k people (it used to be 8.6k, 25k and 19.5k).
+
+**Search.** The index holds the 40k most notable happenings plus the 6k most notable places known only roughly ("founded 4th century BC": Paris, Rome, Babylon). Results rank by how well the title matches (exact, then prefix, then whole words, then anywhere), then by notability, with a nudge for events over places and people, so "waterloo" finds the battle before the station. "world war 2", "ww2" and "wwii" all find World War II.
 
 **Time window.** Default half-width by era: ±2 years after 1900, ±5 after 1700, ±10 after 1500, ±20 after 1000, ±40 after AD 1, wider before that.
 

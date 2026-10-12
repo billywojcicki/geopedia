@@ -50,6 +50,9 @@ EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED, PREMIERED, DISCOVERED = range(8)
 HAPPENED = {EVENT, PREMIERED, DISCOVERED}  # things that happened, as opposed to places and lives
 
 LONG_SPAN = 25  # years; longer happenings go to long.json
+SEARCH_MAX = 40000  # happenings in the search index
+SEARCH_MAX_PLACES = 6000  # plus this many places known only from the standing layer
+SEARCH_MIN_PLACE_SCORE = 10
 LOD_K = 8  # events per 512px tile per time slice before the rest wait for a deeper zoom
 LOD_MAX_Z = 8  # minzoom 8 means "8 or deeper"
 # Foundings, births and deaths get their own, smaller share of each tile and
@@ -115,6 +118,11 @@ def guess_cat(title, desc):
     return None
 
 
+# Continents, oceans, seas, regions: an event listing two of these is spread out.
+REGION_CLASSES = {"Q5107", "Q9430", "Q165", "Q82794", "Q2221906"}
+LOCAL_KM = 500  # an event's places further apart than this aren't one place
+WORLDWIDE_MIN_SITELINKS = 40  # events spread over several regions must be this notable
+WORLD_KM = 5000  # places further apart than this: a worldwide event, not pinned
 NATIONWIDE_MIN_SITELINKS = 10  # events known only by country must be this notable
 WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
 SPORTS_MIN_SITELINKS = 40
@@ -144,6 +152,30 @@ def parse_point(s):
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
         return None
     return round(lat, 4), round(lon, 4)
+
+
+def km(a, b):
+    """Great-circle distance between (lat, lon) points."""
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    h = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 2 * 6371 * math.asin(min(1, math.sqrt(h)))
+
+
+def spread(pts):
+    return max((km(a, b) for n, a in enumerate(pts) for b in pts[n + 1:]), default=0)
+
+
+def centroid(pts):
+    """Mean direction of points on the sphere, as (lat, lon)."""
+    x = y = z = 0
+    for lat, lon in pts:
+        la, lo = math.radians(lat), math.radians(lon)
+        x += math.cos(la) * math.cos(lo)
+        y += math.cos(la) * math.sin(lo)
+        z += math.sin(la)
+    lat = math.degrees(math.atan2(z, math.hypot(x, y)))
+    lon = math.degrees(math.atan2(y, x))
+    return round(max(-60, min(70, lat)), 4), round(lon, 4)
 
 
 def parse_time(t, prec):
@@ -326,17 +358,36 @@ def main():
             pt = parse_point(r["c"])
             if pt:
                 coords[i] = pt
-    loccoords = {}
+    # Events located through P276. A specific place (city, site) wins over
+    # vague ones (country, continent, ocean: centroids mean nothing). Events
+    # whose places are far apart are regional (pinned on their most central
+    # place) or, past WORLD_KM, worldwide (the world wars, the Cold War: listed
+    # and searchable, never pinned).
+    locs = defaultdict(dict)  # item -> location -> (point, vague, continent/ocean/region, capital)
     for r in read("loccoords"):
         i = qid(r["item"])
-        if i not in items or i in loccoords:
-            continue
-        if r["cap"] or r["big"]:
-            loccoords[i] = None  # located in a country/state/ocean: too vague
-            continue
         pt = parse_point(r["c"])
-        if pt:
-            loccoords[i] = pt
+        if i in items and pt:
+            _, vague, region, cap = locs[i].get(r["loc"], (0, False, False, None))
+            big = r["big"].rsplit("/", 1)[-1]
+            locs[i][r["loc"]] = (pt, vague or bool(r["cap"] or big), region or big in REGION_CLASSES,
+                                 cap or parse_point(r["capc"]))
+    loccoords = {}
+    spread_out = {}  # item -> (points, place label, fallback point, places to pin a regional event on)
+    for i, ls in locs.items():
+        specific = [pt for pt, vague, _, _ in ls.values() if not vague]
+        everywhere = [pt for pt, _, _, _ in ls.values()]
+        regions = sum(region for _, _, region, _ in ls.values())
+        if specific and spread(specific) <= LOCAL_KM and regions < 2:
+            loccoords[i] = specific[0]
+        elif len(everywhere) > 1 and spread(everywhere) > LOCAL_KM:
+            loccoords[i] = None
+            # Countries count by their capital; continents and oceans not at all.
+            pins = specific + [cap for _, vague, _, cap in ls.values() if vague and cap]
+            spread_out[i] = (everywhere, "", specific[0] if specific else None, pins)
+        else:
+            loccoords[i] = specific[0] if specific else None
+    del locs
     # Events placed only by city/district.
     for r in read("p131coords"):
         i = qid(r["item"])
@@ -356,10 +407,12 @@ def main():
         countries[i][r["country"]] = (pt, r["label"] or "")
     nationwide = {}
     for i, cs in countries.items():
-        if len(cs) == 1:
-            pt, label = next(iter(cs.values()))
-            if pt:
-                nationwide[i] = (pt, label)
+        pts = [pt for pt, _ in cs.values() if pt]
+        if len(cs) == 1 and pts:
+            nationwide[i] = (pts[0], next(iter(cs.values()))[1])
+        elif len(pts) > 1 and i not in spread_out and spread(pts) > LOCAL_KM:
+            labels = [label for _, label in cs.values()]
+            spread_out[i] = (pts, ", ".join(labels) if len(labels) <= 3 and all(labels) else "", None, pts)
     del countries
 
     dates = defaultdict(lambda: defaultdict(list))
@@ -373,6 +426,7 @@ def main():
 
     print("classifying…")
     happenings = []
+    worldwide_recs = []  # no single place: searchable, listed, never pinned
     standing = []
     stats = Counter()
 
@@ -402,7 +456,24 @@ def main():
                 continue
             pt = coords.get(i) or loccoords.get(i)
             place = ""
-            if not pt and i in nationwide and cat and cat != "sports" and sl >= NATIONWIDE_MIN_SITELINKS \
+            worldwide = False
+            if not pt and i in spread_out:
+                pts, place, pt, pins = spread_out[i]  # pt: a specific place to fall back on
+                if not (cat and cat != "sports" and sl >= WORLDWIDE_MIN_SITELINKS):
+                    place = ""
+                elif spread(pts) > WORLD_KM:
+                    pt = centroid(pts)
+                    place = place or "Worldwide"
+                    worldwide = True
+                    stats["event:worldwide"] += 1
+                elif pins:
+                    # A regional event: pinned on whichever of its places is most central.
+                    mid = centroid(pts)
+                    pt = min(pins, key=lambda q: km(q, mid))
+                    stats["event:regional"] += 1
+                else:
+                    pt = None
+            elif not pt and i in nationwide and cat and cat != "sports" and sl >= NATIONWIDE_MIN_SITELINKS \
                     and not elections.get(i):
                 (pt, place) = nationwide[i]
                 stats["event:nationwide"] += 1
@@ -428,8 +499,9 @@ def main():
                 label = date_label(first, last)
             disp = "culture" if cat in ("culture", "sports") else (cat or "politics")
             score = sl * WEIGHT[cat or "event"] * bonus
-            happenings.append([i, it["title"], pt[0], pt[1], start, end, CAT[disp], EVENT,
-                               round(score, 1), img, it.get("desc", ""), label, place])
+            rec = [i, it["title"], pt[0], pt[1], start, end, CAT[disp], EVENT,
+                   round(score, 1), img, it.get("desc", ""), label, place]
+            (worldwide_recs if worldwide else happenings).append(rec)
             stats[f"event:{cat}"] += 1
             continue
 
@@ -502,7 +574,7 @@ def main():
         print(f"  {k}: {v}")
     print(f"  happenings: {len(happenings)}  standing: {len(standing)}")
 
-    write(happenings, standing)
+    write(happenings, standing, worldwide_recs)
 
 
 _digest = hashlib.sha1()
@@ -591,7 +663,7 @@ def quadtree(recs, max_n, write_leaf):
     split(recs, -180, -90, 180, 90, "")
 
 
-def write(happenings, standing):
+def write(happenings, standing, worldwide):
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
     os.makedirs(OUT)
@@ -654,27 +726,47 @@ def write(happenings, standing):
         recs.sort(key=lambda r: -r[8])
         total += dump(os.path.join(OUT, "p", f"{key}.json"), recs)
         places.append([key, *bbox, len(recs)])
+        for r in recs:
+            loc[id(r)] = f"p/{key}"
 
     quadtree(standing, TILE_MAX, write_places)
     print(f"  standing: {len(places)} files, {len(standing)} records")
 
+    # Events with no one place: a small file the app keeps whole.
+    worldwide.sort(key=lambda r: -r[8])
+    for r in worldwide:
+        r.append(0)
+        loc[id(r)] = "world"
+    total += dump(os.path.join(OUT, "world.json"), worldwide)
+    print(f"  worldwide: {len(worldwide)} records")
+
     # Year histogram for the timeline (short + long happenings by start year).
     hist = Counter()
-    for r in happenings:
+    for r in happenings + worldwide:
         hist[max(MIN_YEAR, min(MAX_YEAR, r[4]))] += 1
     total += dump(os.path.join(OUT, "hist.json"), {
         "min": MIN_YEAR, "max": MAX_YEAR, "counts": [hist.get(y, 0) for y in range(MIN_YEAR, MAX_YEAR + 1)]})
 
-    # Search index: the most notable items, with the file holding each.
+    # Search index: the most notable items, with the file holding each. Places
+    # whose founding is only known roughly ("4th century BC") are in no
+    # happening file, so the notable ones come from the standing layer.
     seen = set()
     search = []
-    for r in sorted(happenings, key=lambda r: -r[8]):
+    cutoff = 0
+    for r in sorted(happenings + worldwide, key=lambda r: -r[8]):
         if r[0] in seen:
             continue
         seen.add(r[0])
         search.append([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], loc[id(r)]])
-        if len(search) >= 40000:
+        if len(search) >= SEARCH_MAX:
+            cutoff = r[8]
             break
+    extra = [r for r in standing if r[0] not in seen and r[8] >= max(cutoff, SEARCH_MIN_PLACE_SCORE)]
+    for r in sorted(extra, key=lambda r: -r[8])[:SEARCH_MAX_PLACES]:
+        search.append([r[0], r[1], r[2], r[3], r[4], r[4], r[6], r[7], loc[id(r)]])
+    # Most notable first: the app ranks ties by position.
+    score = {r[0]: r[8] for r in happenings + worldwide + standing}
+    search.sort(key=lambda e: -score[e[0]])
     total += dump(os.path.join(OUT, "search.json"), search)
 
     index = {
