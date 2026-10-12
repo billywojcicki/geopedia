@@ -6,7 +6,7 @@ A map of history. Scroll around the world, drag the timeline, and see the Wikipe
 - **Zoomed in** on a city you get the local stuff: every battle, riot, treaty, building and birth that Wikipedia knows about there, plus the places that already existed at that point in time.
 - **The timeline** picks a year and a window around it (auto-sized by era, or pick your own). The map tints toward parchment and fades modern roads as you go back.
 - **Click anything** to read the Wikipedia summary in the side panel, or the full article inline.
-- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders overlay, shareable links (Share button on every article), play button, light/dark mode.
+- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders (on by default before 1900), shareable links (Share button on every article), play button, light/dark mode.
 - **On phones** the panel is a bottom sheet (peek, half, full) you drag by its top. Tapping a pin opens the article at half height with the pin centred in the map above it; tapping the map or swiping down puts it away.
 
 ## Run it
@@ -26,7 +26,7 @@ To host it, turn on GitHub Pages for the branch (Settings > Pages > Deploy from 
 index.html, css/, js/     the site (vanilla JS modules)
 sw.js                     service worker (caching, see Performance)
 data/                     generated history data the site loads (committed)
-basemap/                  self-hosted world basemap, map style, label fonts (generated)
+basemap/                  self-hosted world basemap, map style, label fonts, historical borders (generated)
 vendor/                   MapLibre GL, served from this site (fetched by the build)
 scripts/                  data pipeline (Python 3, stdlib only)
 ```
@@ -34,6 +34,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 | File | What it does |
 | --- | --- |
 | `js/app.js` | State, map layers, sidebar list, article panel, search, URL state |
+| `js/search.js` | Search ranking |
 | `js/data.js` | Works out which data files a view needs and loads them |
 | `js/pins.js` | Greedy screen-space placement of labelled photo pins |
 | `js/sheet.js` | Phone bottom sheet: snap points, drag with momentum |
@@ -48,6 +49,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 python3 scripts/fetch_wikidata.py   # ~2 min, caches CSVs in build/raw/
 python3 scripts/build_data.py       # ~40 s, writes data/
 python3 scripts/build_basemap.py    # writes basemap/ and vendor/ (rarely needs rerunning)
+python3 scripts/build_borders.py    # writes basemap/borders/ (rarely needs rerunning)
 node scripts/social_card.mjs URL    # optional: re-shoot og.jpg and icons/ (needs Playwright)
 ```
 
@@ -81,6 +83,10 @@ So the world view downloads only the world's top items for the window, and a cit
 
 **Our own world basemap.** OpenFreeMap's world-level tiles are 300-700 KB each, so the default view used to pull ~5.5 MB of tiles (plus 1.2 MB of shaded-relief images) and showed a patchy map while they arrived. Below zoom 6 the map now draws only `basemap/world.json`: Natural Earth 1:50m land, lakes, borders and labels, simplified to what those zooms can show and delta-encoded, 170 KB gzipped. OpenFreeMap tiles load only from zoom 6, where they're smaller; our coarse land stays underneath until zoom 7.5 so the sea never flashes land-coloured while they arrive. The relief layer is gone (it was also why zooming in looked blurry).
 
+**Historical borders, self-hosted.** The originals are 2-4 MB per era (600 KB gzipped from a CDN) and parsing one froze the page for most of a second. `scripts/build_borders.py` simplifies each era to about a pixel at zoom 5, 120 KB gzipped, and adds one label point per polity; the map's worker fetches and parses them, so changing era costs the page nothing. They load only once the map is idle, so they never slow the first view.
+
+**Old maps vs. today's.** The basemap is always today's (OpenStreetMap streets and buildings, modern country borders and names); nobody has historical street data at world scale. Going back in time it shifts to a parchment tint and fades roads, railways and buildings (mostly gone by 1750). Before 1900 the historical borders overlay is on by default and hides modern borders and country names; the Layers toggle overrides that.
+
 **One origin for the first view.** MapLibre, the map style, the world basemap and the Latin glyphs of the label font are all served from this site, so the first view needs no third-party server at all (other glyph ranges still come from OpenFreeMap when needed).
 
 **Startup.** `index.html` starts fetching the data index, map style and world basemap before any script runs, all JS modules are preloaded in parallel, and the app module runs before MapLibre (the biggest download) arrives, so the first view's data is already in flight. Pins and the sidebar list go up as soon as the data lands, without waiting for map tiles.
@@ -110,49 +116,68 @@ Full Wikipedia text is tens of GB, so the static part is an index (title, place,
 
 **Source.** Wikidata, because it has what Wikipedia articles lack: structured coordinates and dates. Every item must have an English Wikipedia article.
 
-**What's on the map.** Three kinds of things:
+**What's on the map.** Events are the point; places and people are the backdrop.
 
-1. **Events** with a date (`point in time`, or `start`/`end time`) and a place (own coordinates, or the coordinates of their `location` if that's a city or site; events located only in a whole country or ocean are dropped because a centroid is meaningless). About 40k.
-2. **Places** with a founding date (`inception` or `opening date`): buildings, towns, institutions, historical states. They appear as a "Built / Founded / Established" event in their year, and when zoomed in they also appear (in grey) for every year they existed, until `dissolved/demolished` if known. About 250k.
-3. **People** with 25+ Wikipedia language editions: births and deaths at the birth/death place. About 80k.
+1. **Events** with a date (`point in time`, or `start`/`end time`) and a place. The place is, in order: the event's own coordinates; its `location` if that's a city or site; its `located in` (P131) district or city. Notable events (10+ language editions) known only by country, like reforms, crises and revolutions, are pinned on that country's capital and labelled with the country. National elections are left out of that fallback (they'd crowd every capital). Events whose places are far apart are pinned on their most central place (countries count by their capital), or, past 5,000 km, are **worldwide**: the world wars, the Cold War, the Holocaust, the Black Death and about 20 more have no pin. They're listed under the heading of the years they cover, are searchable, and opening one shows the whole world. About 38k.
+2. **Premieres and discoveries**: operas, plays and ballets at the theatre where they premiered, and scientific discoveries where they were made (not chemical elements "discovered in Sweden"). About 3.4k.
+3. **Places** with a founding date (`inception` or `opening date`): buildings, towns, institutions, historical states. They appear as a "Built / Founded / Established" event in their year, and when zoomed in they also appear (in grey) for every year they existed, until `dissolved/demolished` if known. About 250k.
+4. **People** with 25+ Wikipedia language editions: births and deaths at the birth/death place. About 80k. Off by default.
 
-**Categories.** Each item's Wikidata class is walked up the subclass tree to its *nearest* known root: battles, sieges, wars, massacres go to War & conflict; treaties, protests, revolutions, assassinations, elections to Politics & society; earthquakes, fires, accidents, epidemics to Disasters; festivals, exhibitions, expeditions, major sports to Culture & science. Nearest matters because Wikidata's tree is messy (a protest is, eventually, a "conflict"; Paris is, eventually, an "electoral unit").
+**Categories.** Each item's Wikidata class is walked up the subclass tree to its *nearest* known root. Nearest matters because Wikidata's tree is messy (a protest is, eventually, a "conflict"; Paris is, eventually, an "electoral unit"). On a tie, the more specific category wins over Politics, whose roots (meeting, ceremony) are broad.
 
-**Dropped as noise.** Sports seasons and matches (unless 40+ language editions, so World Cups and Olympics stay), award ceremonies, concert tours, eclipses, radio/TV stations, films, TV shows, languages, paintings and other artworks, modern countries (centroid coordinates), constituencies.
+| Category | What's in it |
+| --- | --- |
+| War & conflict | Battles, sieges, wars, raids, massacres, genocides, revolts, insurgencies, coups, military operations |
+| Politics & society | Treaties, revolutions, reforms, protests, strikes, social movements, elections, summits, councils, coronations, scandals, assassinations, economic crises and crashes |
+| Disasters | Earthquakes, eruptions, floods, fires, famines, epidemics, shipwrecks, air and rail accidents |
+| Arts & culture | Festivals, exhibitions, world's fairs, art movements, golden ages, premieres, the biggest sports events |
+| Science & discovery | Expeditions, experiments, discoveries, space missions, launches, nuclear tests |
+| Built & founded | Buildings, towns, institutions and states, in their founding year |
+| Births & deaths | Off by default |
+
+Events with no usable class get one from unambiguous title wording ("Battle of", "massacre", "mine disaster"); anything else unclassified shows under Politics & society.
+
+**Dropped as noise.** Sports seasons and matches, and other yearly editions (pageants, film festivals, championships, drafts), unless 40+ language editions, so World Cups and Olympics stay. Award ceremonies and honours lists, concert tours, eclipses, radio/TV stations, films, TV shows, languages, paintings and other artworks, currencies, newspapers, modern countries (centroid coordinates), constituencies, "List of" articles.
 
 **Ranking.** Importance = number of Wikipedia language editions with an article (sitelinks), times a weight per kind, times 1.15 if there's a photo:
 
 | Kind | Weight | Why |
 | --- | --- | --- |
 | War, politics | 1.0 | What the map is for |
-| Disasters, culture | 0.9 | |
+| Disasters, culture, science, discoveries | 0.9 | |
+| Premieres | 0.8 | |
 | Generic dated events | 0.75 | |
-| Notable buildings | 0.65 | |
-| Towns and cities | 0.3 | Every Wikipedia has an article on every city, so they'd swamp events |
-| Institutions | 0.3 | Same problem |
-| Deaths / births | 0.3 / 0.25 | Births mostly surface people famous decades later |
-| Schools, stations, firms, counties | 0.15 | Kept for local colour when zoomed in |
 | Big sports events | 0.5 | |
+| Notable buildings | 0.5 | |
+| Towns and cities | 0.25 | Every Wikipedia has an article on every city, so they'd swamp events |
+| Institutions | 0.25 | Same problem |
+| Deaths / births | 0.2 / 0.15 | Births mostly surface people famous decades later |
+| Schools, stations, firms, counties | 0.1 | Kept for local colour when zoomed in |
 
-On the map, places that merely existed rank at a third of their score, and long events (wars, eras) are discounted by their length so the specific beats the general.
+Premieres and discoveries count at most 60 language editions, so a famous opera or element doesn't outrank a war. On the map, buildings, foundings and people rank at 0.6 of their score and places that merely existed at 0.35; long events (wars, eras) are discounted by their length so the specific beats the general.
 
-**Zoom.** Pins are placed greedily in priority order and skipped if they'd overlap one already placed, so the most notable things win at world scale and local ones appear as you zoom in. Small dots show the rest of what is loaded for that zoom and window.
+**Zoom.** Pins are placed greedily in priority order and skipped if they'd overlap one already placed, so the most notable things win at world scale and local ones appear as you zoom in. Buildings, foundings, people and standing places get at most a third of the labels on screen, so events lead even in a city. Small dots show the rest of what is loaded for that zoom and window.
+
+The data tiles have their own budget per zoom: each 512px tile keeps its 8 most notable events per time slice, but only its 2 most notable places and people, and those only from 2 zoom levels deeper. At world zoom (z0-3) that's about 22k events, 2.7k places and 1.8k people (it used to be 8.6k, 25k and 19.5k).
+
+**Search.** The index holds the 40k most notable happenings plus the 6k most notable places known only roughly ("founded 4th century BC": Paris, Rome, Babylon). Results rank by how well the title matches (exact, then prefix, then whole words, then anywhere), then by notability, with a nudge for events over places and people, so "waterloo" finds the battle before the station. "world war 2", "ww2" and "wwii" all find World War II.
 
 **Time window.** Default half-width by era: ±2 years after 1900, ±5 after 1700, ±10 after 1500, ±20 after 1000, ±40 after AD 1, wider before that.
 
-**Known gaps.** Things Wikidata lacks a date or coordinates for are missing (about 14k events are only located to a country). Sitelinks favour globally famous things over locally important ones, and Western topics over others. Births use the birthplace's city coordinates, so people stack on city centres. Pre-1500 coverage is thin.
+**Known gaps.** Things Wikidata lacks a date or coordinates for are missing (about 180k dated events have no usable place; the notable country-only ones are on capitals). Sitelinks favour globally famous things over locally important ones, and Western topics over others. Births use the birthplace's city coordinates, so people stack on city centres. Pre-1500 coverage is thin.
 
 ## Open questions
 
 Parked for later, to decide once we've used it more:
 
-1. Should People be off by default? It's the noisiest category (births mostly surface people famous decades later).
-2. More or fewer founding pins (towns, buildings) relative to events?
-3. Should older eras get more attention, e.g. a different time window, more Journeys, or a lower bar for inclusion before 1500?
+1. Should older eras get more attention, e.g. a different time window, more Journeys, or a lower bar for inclusion before 1500?
+2. More categories? Candidates: religion (councils, schisms, crusades, pilgrimages, currently split between Politics and War), economy and trade (crashes, trade routes, companies, now in Politics), exploration (voyages, now in Science), sport as its own filter (now folded into Culture).
+
+Decided: People is off by default; founding pins stay but are backdrop (capped share of labels, lower weight, a deeper zoom before they show).
 
 ## Credits
 
 - Data: [Wikidata](https://www.wikidata.org) (CC0) and [Wikipedia](https://en.wikipedia.org) (CC BY-SA 4.0), images from Wikimedia Commons (various licenses)
 - Basemap: [Natural Earth](https://www.naturalearthdata.com) (public domain) when zoomed out; [OpenFreeMap](https://openfreemap.org), [OpenMapTiles](https://openmaptiles.org), [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors when zoomed in. Label font: Noto Sans (SIL Open Font License)
-- Historical borders: [aourednik/historical-basemaps](https://github.com/aourednik/historical-basemaps) (GPL-3.0), loaded on demand
+- Historical borders: [aourednik/historical-basemaps](https://github.com/aourednik/historical-basemaps) (GPL-3.0), simplified and self-hosted in `basemap/borders/` (see `SOURCE.md` there)
 - Map rendering: [MapLibre GL JS](https://maplibre.org) (BSD-3-Clause), vendored in `vendor/`

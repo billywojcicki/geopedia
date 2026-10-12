@@ -1,8 +1,11 @@
 // Historical borders overlay from aourednik/historical-basemaps (GPL-3.0),
-// loaded on demand from jsDelivr. Snapshots are approximate and sparse; we show
-// the latest snapshot at or before the selected year.
+// simplified and self-hosted by scripts/build_borders.py. Snapshots are
+// approximate and sparse; we show the latest snapshot at or before the year.
+// The map's worker fetches and parses each file, so switching eras never
+// stalls the page.
 
-const BASE = 'https://cdn.jsdelivr.net/gh/aourednik/historical-basemaps@master/geojson/';
+const BASE = new URL('basemap/borders/', document.baseURI).href;
+// Must match SNAPSHOTS in scripts/build_borders.py.
 const SNAPSHOTS = [
   -123000, -10000, -8000, -5000, -4000, -3000, -2000, -1500, -1000, -700, -500, -400, -323, -300, -200, -100, -1,
   100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1279, 1300, 1400, 1492, 1500, 1530, 1600, 1650,
@@ -10,8 +13,8 @@ const SNAPSHOTS = [
 ];
 const MODERN_LAYERS = /^(boundary_|label_country|world-(borders|states|countries))/;
 
-function fileFor(y) {
-  return y < 0 ? `world_bc${-y}.geojson` : `world_${y}.geojson`;
+function keyFor(y) {
+  return y < 0 ? `bc${-y}` : String(y);
 }
 
 function snapshotFor(year) {
@@ -20,19 +23,11 @@ function snapshotFor(year) {
   return s;
 }
 
-// Stable pastel per polity name.
-function hue(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
-
 export class Borders {
   constructor(map) {
     this.map = map;
     this.on = false;
     this.snapshot = null;
-    this.cache = new Map();
     this.timer = null;
   }
 
@@ -53,22 +48,11 @@ export class Borders {
     this.timer = setTimeout(() => this.load(s), dragging ? 250 : 0);
   }
 
-  async load(s) {
+  load(s) {
     this.snapshot = s;
-    if (!this.cache.has(s)) {
-      this.cache.set(s, fetch(BASE + fileFor(s)).then(r => r.json()).then(gj => {
-        for (const f of gj.features) {
-          const n = f.properties.NAME || f.properties.SUBJECTO || '';
-          f.properties.h = hue(f.properties.SUBJECTO || n);
-          f.properties.label = n;
-        }
-        return gj;
-      }).catch(() => null));
-    }
-    const gj = await this.cache.get(s);
-    if (!gj || !this.on || this.snapshot !== s) return;
     this.ensureLayers();
-    this.map.getSource('borders').setData(gj);
+    this.map.getSource('borders').setData(`${BASE}${keyFor(s)}.geojson`);
+    this.map.getSource('borders-labels').setData(`${BASE}${keyFor(s)}.labels.geojson`);
   }
 
   ensureLayers() {
@@ -77,26 +61,26 @@ export class Borders {
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
     // maxzoom 6: the outlines are approximate anyway, so deeper zooms reuse
     // the z6 tiles instead of re-cutting the whole world on every zoom.
-    map.addSource('borders', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, tolerance: 0.6, maxzoom: 6 });
+    const empty = { type: 'FeatureCollection', features: [] };
+    map.addSource('borders', { type: 'geojson', data: empty, tolerance: 0.6, maxzoom: 6 });
+    map.addSource('borders-labels', { type: 'geojson', data: empty });
     const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
     const fill = ['to-color', ['concat', 'hsl(', ['to-string', ['get', 'h']], dark ? ', 35%, 45%)' : ', 55%, 62%)']];
     map.addLayer({
       id: 'borders-fill', type: 'fill', source: 'borders',
-      filter: ['!=', ['get', 'label'], ''],
       paint: { 'fill-color': fill, 'fill-opacity': dark ? 0.2 : 0.16 },
     }, firstSymbol);
     map.addLayer({
       id: 'borders-line', type: 'line', source: 'borders',
-      filter: ['!=', ['get', 'label'], ''],
       paint: {
         'line-color': dark ? 'rgba(235,235,245,0.45)' : 'rgba(60,50,40,0.45)',
         'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 6, 1.2],
       },
     }, firstSymbol);
     map.addLayer({
-      id: 'borders-label', type: 'symbol', source: 'borders',
-      filter: ['!=', ['get', 'label'], ''],
+      id: 'borders-label', type: 'symbol', source: 'borders-labels',
       layout: {
+        'symbol-sort-key': ['-', ['get', 'area']],
         'text-field': ['get', 'label'],
         'text-font': ['Noto Sans Italic'],
         'text-size': ['interpolate', ['linear'], ['zoom'], 1, 10, 5, 13, 8, 15],
@@ -116,7 +100,7 @@ export class Borders {
   removeLayers() {
     const map = this.map;
     for (const id of ['borders-label', 'borders-line', 'borders-fill']) if (map.getLayer(id)) map.removeLayer(id);
-    if (map.getSource('borders')) map.removeSource('borders');
+    for (const id of ['borders', 'borders-labels']) if (map.getSource(id)) map.removeSource(id);
     this.snapshot = null;
   }
 

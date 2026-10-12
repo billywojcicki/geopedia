@@ -33,6 +33,8 @@ export class Sheet {
     });
     const relayout = () => { this.measure(); this.apply(); };
     addEventListener('resize', relayout);
+    // Its height follows 100dvh, which can change without a resize event.
+    new ResizeObserver(() => { if (this.active && this.el.offsetHeight !== this.full) relayout(); }).observe(el);
     PHONE.addEventListener('change', () => { relayout(); this.onChange(this.state); });
     this.measure();
     this.apply();
@@ -47,11 +49,13 @@ export class Sheet {
     document.body.append(probe);
     this.safeBottom = probe.offsetHeight;
     probe.remove();
-    const H = innerHeight;
-    this.full = H - FULL_GAP;
+    // The sheet's own height, not innerHeight: under iOS Safari's floating
+    // toolbar the two disagree, and the sheet would show more than it should
+    // (covering the timeline, which is placed from the same bottom edge).
+    this.full = (this.active && this.el.offsetHeight) || innerHeight - FULL_GAP;
     this.heights = {
       peek: PEEK + this.safeBottom,
-      half: Math.round(H * 0.5),
+      half: Math.round((this.full + FULL_GAP) * 0.5),
       full: this.full,
     };
   }

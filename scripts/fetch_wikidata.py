@@ -28,11 +28,19 @@ PREFIX psv: <http://www.wikidata.org/prop/statement/value/>
 
 ENWIKI = "?article schema:about ?item ; schema:isPartOf <https://en.wikipedia.org/> ."
 
-# Non-human items that carry a date and a location (own or via P276).
+# Non-human items that carry a date and a location. Events may also be
+# located only by the city or region (P131) or country (P17) they happened
+# in: the build places those at that city, or at the country's capital.
 CANDIDATE = """
-  { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P571 [] } UNION { ?item wdt:P1619 [] }
-  { ?item wdt:P625 [] } UNION { ?item wdt:P276 ?_l . ?_l wdt:P625 [] }
+  {
+    { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] } UNION { ?item wdt:P571 [] } UNION { ?item wdt:P1619 [] }
+    { ?item wdt:P625 [] } UNION { ?item wdt:P276 ?_l . ?_l wdt:P625 [] }
+  } UNION {
+    { ?item wdt:P585 [] } UNION { ?item wdt:P580 [] }
+    { ?item wdt:P131 ?_m . ?_m wdt:P625 [] } UNION { ?item wdt:P17 [] }
+  }
 """
+EVENT_DATE = "{ ?item wdt:P585 [] } UNION { ?item wdt:P580 [] }"
 
 # Minimum sitelinks for people (births/deaths) to keep the set focused.
 PEOPLE_MIN_SITELINKS = 25
@@ -61,13 +69,35 @@ SELECT DISTINCT ?item ?c WHERE {{
     # Events located only through P276. ?cap/?big flag locations that are
     # countries, states, oceans etc. (their coordinate is a meaningless centroid).
     "loccoords": f"""
-SELECT DISTINCT ?item ?loc ?c ?cap ?big WHERE {{
+SELECT DISTINCT ?item ?loc ?c ?cap ?capc ?big WHERE {{
   {ENWIKI}
   {{ ?item wdt:P585 [] }} UNION {{ ?item wdt:P580 [] }}
   ?item wdt:P276 ?loc . ?loc wdt:P625 ?c .
   FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
-  OPTIONAL {{ ?loc wdt:P36 ?cap }}
+  OPTIONAL {{ ?loc wdt:P36 ?cap OPTIONAL {{ ?cap wdt:P625 ?capc }} }}
   OPTIONAL {{ ?loc wdt:P31 ?big VALUES ?big {{ wd:Q6256 wd:Q3624078 wd:Q5107 wd:Q9430 wd:Q165 wd:Q3024240 wd:Q35657 wd:Q107390 wd:Q10864048 wd:Q1620908 wd:Q82794 wd:Q2221906 }} }}
+}}""",
+    # Events located only through P131 (city, district...). ?cap flags regions
+    # with a capital (states, provinces): too vague to pin.
+    "p131coords": f"""
+SELECT DISTINCT ?item ?loc ?c ?cap WHERE {{
+  {ENWIKI}
+  {EVENT_DATE}
+  ?item wdt:P131 ?loc . ?loc wdt:P625 ?c .
+  FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
+  OPTIONAL {{ ?loc wdt:P36 ?cap }}
+}}""",
+    # Country of each dated event without its own coordinates: the build pins
+    # nationwide events (revolutions, famines, reforms) at the capital.
+    "countrycoords": f"""
+SELECT DISTINCT ?item ?country ?label ?capc ?cc WHERE {{
+  {ENWIKI}
+  {EVENT_DATE}
+  ?item wdt:P17 ?country .
+  FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
+  OPTIONAL {{ ?country wdt:P36 ?cap . ?cap wdt:P625 ?capc }}
+  OPTIONAL {{ ?country wdt:P625 ?cc }}
+  OPTIONAL {{ ?country rdfs:label ?label FILTER(LANG(?label) = "en") }}
 }}""",
     "classes": f"""
 SELECT DISTINCT ?item ?cls WHERE {{
@@ -104,6 +134,24 @@ SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) (SAMPLE(?tv) AS ?t) (SA
   {ENWIKI} ?article schema:name ?ti .
   ?item p:{date_prop}/psv:{date_prop} [ wikibase:timeValue ?tv ; wikibase:timePrecision ?pr ] .
   ?item wdt:{place_prop} ?pl . ?pl wdt:P625 ?co .
+  OPTIONAL {{ ?pl rdfs:label ?pll FILTER(LANG(?pll) = "en") }}
+  OPTIONAL {{ ?item wdt:P18 ?img }}
+  OPTIONAL {{ ?item schema:description ?d FILTER(LANG(?d) = "en") }}
+}} GROUP BY ?item"""
+
+
+# Works first performed at a known venue (operas, ballets, plays, symphonies)
+# and objects found at a known place (hoards, fossils, manuscripts).
+for kind, date_prop, place_prop in [("premieres", "P1191", "P4647"), ("discoveries", "P575", "P189")]:
+    QUERIES[kind] = f"""
+SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) (SAMPLE(?tv) AS ?t) (SAMPLE(?pr) AS ?prec)
+       (SAMPLE(?pl) AS ?place) (SAMPLE(?pll) AS ?placeLabel) (SAMPLE(?co) AS ?c) (SAMPLE(?cp) AS ?cap)
+       (SAMPLE(?img) AS ?image) (SAMPLE(?d) AS ?desc) WHERE {{
+  ?item wikibase:sitelinks ?s .
+  {ENWIKI} ?article schema:name ?ti .
+  ?item p:{date_prop}/psv:{date_prop} [ wikibase:timeValue ?tv ; wikibase:timePrecision ?pr ] .
+  ?item wdt:{place_prop} ?pl . ?pl wdt:P625 ?co .
+  OPTIONAL {{ ?pl wdt:P36 ?cp }}
   OPTIONAL {{ ?pl rdfs:label ?pll FILTER(LANG(?pll) = "en") }}
   OPTIONAL {{ ?item wdt:P18 ?img }}
   OPTIONAL {{ ?item schema:description ?d FILTER(LANG(?d) = "en") }}

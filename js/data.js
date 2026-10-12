@@ -57,6 +57,7 @@ export class Store {
     this.version = '';
     this.files = new Map(); // path -> records[] | Promise
     this.long = [];
+    this.world = []; // events with no one place (world wars): listed, never pinned
     this.search = null;
     this.onLoad = () => {};
   }
@@ -66,6 +67,9 @@ export class Store {
     this.index = await (indexPromise || this.fetchRaw('index', false));
     this.version = this.index.version;
     this.longReady = this.fetchRaw('long').then(rows => { this.long = rows.map(a => toRecord(a, false)); this.onLoad(); });
+    this.worldReady = this.fetchRaw('world', true, 'low')
+      .then(rows => { this.world = rows.map(a => ({ ...toRecord(a, false), world: true })); this.onLoad(); })
+      .catch(() => {});
   }
 
   url(path, versioned = true) {
@@ -197,6 +201,7 @@ export class Store {
   // Find a record by id in the file the search index says holds it.
   async findRecord(entry) {
     if (entry.loc === 'long') { await this.longReady; return this.long.find(r => r.id === entry.id) || null; }
+    if (entry.loc === 'world') { await this.worldReady; return this.world.find(r => r.id === entry.id) || null; }
     const recs = await this.load(entry.loc).catch(() => null);
     return recs?.find(r => r.id === entry.id) || null;
   }

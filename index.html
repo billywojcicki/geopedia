@@ -51,6 +51,7 @@
   <link rel="modulepreload" href="js/wiki.js">
   <link rel="modulepreload" href="js/borders.js">
   <link rel="modulepreload" href="js/sheet.js">
+  <link rel="modulepreload" href="js/search.js">
 
   <link rel="stylesheet" href="css/app.css">
   <!-- Only the map needs this, and the map waits for its script anyway. -->
@@ -91,6 +92,7 @@
       <div class="list-head">
         <div id="list-title" class="list-title"></div>
         <div id="list-sub" class="list-sub"></div>
+        <div id="list-world" class="list-world" hidden></div>
       </div>
       <ol id="list" class="list"></ol>
     </section>
@@ -133,7 +135,7 @@
       <label class="toggle"><input type="checkbox" id="opt-borders"><span>Historical borders</span><i></i></label>
       <label class="toggle"><input type="checkbox" id="opt-standing" checked><span>Places that existed</span><i></i></label>
       <label class="toggle"><input type="checkbox" id="opt-globe" checked><span>Globe</span><i></i></label>
-      <p class="fine">Borders: <a href="https://github.com/aourednik/historical-basemaps" target="_blank" rel="noopener">historical-basemaps</a> (approximate)</p>
+      <p class="fine">Borders: <a href="https://github.com/aourednik/historical-basemaps" target="_blank" rel="noopener">historical-basemaps</a> (approximate), on by default before 1900</p>
     </div>
   </div>
 

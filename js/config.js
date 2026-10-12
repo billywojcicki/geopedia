@@ -5,14 +5,17 @@ export const CATEGORIES = [
   { id: 'conflict', name: 'War & conflict', short: 'War' },
   { id: 'politics', name: 'Politics & society', short: 'Politics' },
   { id: 'disaster', name: 'Disasters', short: 'Disasters' },
-  { id: 'culture', name: 'Culture & science', short: 'Culture' },
+  { id: 'culture', name: 'Arts & culture', short: 'Culture' },
+  { id: 'science', name: 'Science & discovery', short: 'Science' },
   { id: 'built', name: 'Built & founded', short: 'Built' },
-  { id: 'people', name: 'People', short: 'People' },
+  { id: 'people', name: 'Births & deaths', short: 'People', off: true }, // off by default
 ];
 
 // Record kinds (index = kind code in the data files).
-export const KIND_VERB = ['', 'Built', 'Founded', 'Established', 'Born', 'Died'];
-export const KIND = { EVENT: 0, BUILT: 1, FOUNDED: 2, ESTABLISHED: 3, BORN: 4, DIED: 5 };
+export const KIND_VERB = ['', 'Built', 'Founded', 'Established', 'Born', 'Died', 'Premiered', 'Discovered'];
+export const KIND = { EVENT: 0, BUILT: 1, FOUNDED: 2, ESTABLISHED: 3, BORN: 4, DIED: 5, PREMIERED: 6, DISCOVERED: 7 };
+// Things that happened, as opposed to places and lives (which rank lower).
+export const HAPPENED = new Set([KIND.EVENT, KIND.PREMIERED, KIND.DISCOVERED]);
 
 export const MIN_YEAR = -10000;
 export const MAX_YEAR = 2026;

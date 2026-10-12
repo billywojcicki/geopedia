@@ -8,7 +8,7 @@ matters: Wikidata's class tree is messy (protests are, eventually, a
 """
 
 # Display categories (index = category id used in the data files).
-CATEGORIES = ["conflict", "politics", "disaster", "culture", "built", "people"]
+CATEGORIES = ["conflict", "politics", "disaster", "culture", "science", "built", "people"]
 
 ROOTS = {
     "conflict": [
@@ -18,6 +18,8 @@ ROOTS = {
         "Q645883",  # military operation
         "Q831663",  # military campaign
         "Q180684",  # conflict
+        "Q13427116",  # peasant revolt (otherwise a riot, one step closer)
+        "Q1323212",  # insurgency
         "Q350604",  # armed conflict
         "Q124734",  # rebellion
         "Q3199915",  # massacre
@@ -31,6 +33,8 @@ ROOTS = {
         "Q135010",  # war crime
         "Q750215",  # mass murder
         "Q891854",  # bomb attack
+        "Q41397",  # genocide
+        "Q623179",  # state terrorism
     ],
     "politics": [
         "Q131569",  # treaty
@@ -49,6 +53,21 @@ ROOTS = {
         "Q2761147",  # meeting
         "Q209715",  # coronation
         "Q2627975",  # ceremony
+        "Q900406",  # reform
+        "Q1262732",  # purge
+        "Q934744",  # political scandal
+        "Q518554",  # partition
+        "Q25929224",  # transfer of sovereignty
+        "Q1140229",  # political union
+        "Q1064441",  # democratization
+        "Q546113",  # public policy
+        "Q49773",  # social movement
+        "Q2738074",  # political movement
+        "Q6056746",  # campaign
+        "Q1020018",  # stock market crash
+        "Q290178",  # economic crisis
+        "Q176494",  # recession
+        "Q207781",  # economic bubble
     ],
     "disaster": [
         "Q3839081",  # disaster
@@ -74,14 +93,27 @@ ROOTS = {
         "Q464980",  # exhibition
         "Q172754",  # world's fair
         "Q182832",  # concert
-        "Q2401485",  # expedition
         "Q465299",  # archaeological culture
+        "Q968159",  # art movement
+        "Q238526",  # golden age
+    ],
+    "science": [
+        "Q2401485",  # expedition
+        "Q101965",  # experiment
+        "Q12772819",  # discovery
+        "Q2133344",  # space mission
+        "Q5916",  # spaceflight
+        "Q797476",  # rocket launch
+        "Q210112",  # nuclear weapons testing
     ],
     # Sports are culture, but only kept when very notable (Olympics, World Cups).
+    # Other yearly editions (pageants, festivals, contests) get the same bar.
     "sports": [
         "Q16510064",  # sporting event
         "Q3001412",  # horse race
         "Q27020041",  # sports season (World Cups live here)
+        "Q476300",  # competition
+        "Q27968055",  # recurring event edition
     ],
     # Never shown: noise for a history map, or coordinates that mean nothing.
     "exclude": [
@@ -89,6 +121,7 @@ ROOTS = {
         "Q1060829",  # broadcaster
         "Q1573906",  # concert tour
         "Q3887",  # solar eclipse
+        "Q220397",  # saros (eclipse series)
         "Q14350",  # radio station
         "Q1616075",  # television station
         "Q27971968",  # constituency of the House of Commons
@@ -113,6 +146,12 @@ ROOTS = {
         "Q125191",  # photograph
         "Q87167",  # manuscript
         "Q7725634",  # literary work
+        "Q8142",  # currency
+        "Q11032",  # newspaper
+        "Q41298",  # magazine
+        "Q1792644",  # art style
+        "Q7397",  # software
+        "Q220659",  # archaeological artifact (comes in as a discovery instead)
     ],
     # Kept, but heavily down-weighted (mundane for a history map).
     "low": [
@@ -155,6 +194,9 @@ ROOTS["institution"] = [
     "Q43229",  # organization (fallback, usually far away)
 ]
 
-EVENT_ROLES = ["conflict", "disaster", "politics", "culture", "sports"]
+# Politics comes after culture and science: its roots (meeting, ceremony) are
+# broad, so on a tie the more specific reading wins (a film festival is a
+# meeting too).
+EVENT_ROLES = ["conflict", "disaster", "science", "culture", "politics", "sports"]
 PLACE_ROLES = ["settlement", "structure", "institution", "low"]
 ROLE_PRIORITY = EVENT_ROLES + PLACE_ROLES + ["exclude"]

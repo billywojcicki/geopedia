@@ -1,6 +1,6 @@
 // Geopedia: wires the data store, map, pins, timeline and sidebar together.
 
-import { CATEGORIES, KIND, KIND_VERB, JOURNEYS, DEFAULT_VIEW, STANDING_ZOOM, MIN_YEAR, MAX_YEAR, autoSpan } from './config.js';
+import { CATEGORIES, KIND, KIND_VERB, HAPPENED, JOURNEYS, DEFAULT_VIEW, STANDING_ZOOM, MIN_YEAR, MAX_YEAR, autoSpan } from './config.js';
 import {
   $, el, setChildren, clamp, fmtYear, fmtRange, parseYear, catColor, metaLine,
   thumbUrl, wikiImg, wikiUrl, debounce, throttle, distKm,
@@ -12,15 +12,16 @@ import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
 import { Borders } from './borders.js';
 import { Sheet } from './sheet.js';
+import { rankSearch } from './search.js';
 
 const store = new Store();
 const state = {
   year: DEFAULT_VIEW.year,
   spanMode: DEFAULT_VIEW.span, // 'auto' | number
-  cats: new Set(CATEGORIES.map((_, i) => i)),
+  cats: new Set(CATEGORIES.flatMap((c, i) => (c.off ? [] : [i]))),
   standing: true,
   globe: true,
-  borders: false,
+  borders: null, // null: automatic (on before AUTO_BORDERS_BEFORE); true/false: the user's choice
   selected: null,
 };
 let map, pins, timeline, borders, sheet;
@@ -110,6 +111,8 @@ async function init() {
   map.once('idle', () => {
     store.prefetchWorld();
     registerServiceWorker();
+    bordersReady = true;
+    syncBorders();
   });
 }
 
@@ -146,6 +149,19 @@ function registerServiceWorker() {
 let lastAge = -1;
 let styleReady = false;
 
+// Historical borders are on by default before 1900, when today's borders
+// mislead; the Layers toggle overrides that for the session. They wait for the
+// map's first idle so they never slow down the first view.
+const AUTO_BORDERS_BEFORE = 1900;
+let bordersReady = false;
+function syncBorders(dragging = false) {
+  const on = state.borders ?? state.year < AUTO_BORDERS_BEFORE;
+  $('#opt-borders').checked = on;
+  if (!bordersReady) return;
+  if (on !== borders.on) borders.toggle(on, state.year);
+  else if (on) borders.setYear(state.year, dragging);
+}
+
 function setYear(y, { dragging = false } = {}) {
   state.year = clamp(Math.round(y), MIN_YEAR, MAX_YEAR);
   const [a, b] = range();
@@ -156,7 +172,7 @@ function setYear(y, { dragging = false } = {}) {
 
   const age = Math.round(ageFor(state.year) * 50) / 50;
   if (age !== lastAge && styleReady) { lastAge = age; applyAge(map, theme, age); }
-  if (state.borders) borders.setYear(state.year, dragging);
+  syncBorders(dragging);
   // Prefetch only once the map is up, so it never competes with the first view.
   if (!dragging && map) store.prefetchAround(currentView());
   scheduleUpdate();
@@ -236,7 +252,9 @@ function setLoading(on) {
 
 function priority(r) {
   // Places that merely existed rank below things that happened.
-  if (r.standing) return r.isNew ? r.score : r.score * 0.35;
+  if (r.standing) return r.isNew ? r.score * 0.6 : r.score * 0.35;
+  // Foundings, births and deaths give way to events of similar weight.
+  if (!HAPPENED.has(r.kind)) return r.score * 0.6;
   // Long spans (wars, eras, civilisations) are less about this moment.
   const len = r.end - r.start;
   return len > 10 ? r.score / Math.sqrt(1 + len / 40) : r.score;
@@ -318,7 +336,7 @@ function updateDots() {
 
 function placePins() {
   if (!map) return;
-  pins.place(candidates, state.selected, obstacles());
+  pins.place(candidates, state.selected?.world ? null : state.selected, obstacles());
 }
 
 function onMoveEnd() {
@@ -355,6 +373,18 @@ function renderList() {
   const zoom = map ? map.getZoom() : state.zoom ?? DEFAULT_VIEW.zoom;
   const zoomHint = zoom < STANDING_ZOOM - 0.5 && state.standing ? ' · zoom in for more' : '';
   $('#list-sub').textContent = `${visible.length.toLocaleString()} ${visible.length === 1 ? 'article' : 'articles'} in view${zoomHint}`;
+  // Worldwide events of these years (world wars...), which have no pin.
+  const world = store.world.filter(r => r.start <= b && r.end >= a && state.cats.has(r.cat)).slice(0, 3);
+  const strip = $('#list-world');
+  strip.hidden = !world.length;
+  setChildren(strip, world.map(r => {
+    const icon = el('span', { class: 'globe', 'aria-hidden': 'true' });
+    icon.innerHTML = GLOBE_SVG;
+    const btn = el('button', { class: 'world-chip', style: `--c:${catColor(r.cat)}`, title: `${r.title}, ${r.date}, worldwide` },
+      icon, el('span', {}, r.title));
+    btn.addEventListener('click', () => select(r));
+    return btn;
+  }));
   const list = $('#list');
   if (!visible.length) {
     list.replaceChildren(el('li', { class: 'list-empty' },
@@ -368,6 +398,8 @@ function renderList() {
     list.append(el('li', { class: 'list-more' }, `Showing the ${shown.length} most notable. Zoom in to see more.`));
   }
 }
+
+const GLOBE_SVG = '<svg viewBox="0 0 24 24" width="13" height="13"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5s1.2-6.1 3.8-8.5Z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
 
 function listItem(r) {
   const li = el('li', { style: `--c:${catColor(r.cat)}` },
@@ -471,6 +503,13 @@ function select(r, { fly = false, zoom = null } = {}) {
   state.selected = r;
   pins.setSelected(r.id);
   showArticle(r);
+  if (r.world) {
+    // No one place to pin: show the world it happened across.
+    if (fly) map.flyTo({ center: [r.lng, r.lat], zoom: Math.min(map.getZoom(), 1.6), duration: 1600, essential: true });
+    else placePins();
+    writeHash();
+    return;
+  }
   const z = zoom ?? Math.min(Math.max(map.getZoom(), r.kind === KIND.EVENT ? 7 : 9), 13);
   if (fly) {
     map.flyTo({ center: [r.lng, r.lat], zoom: z, duration: 1600, essential: true });
@@ -608,6 +647,7 @@ function showArticle(r) {
 
 // Other things near this one in the current window.
 function nearbySection(r) {
+  if (r.world) return null;
   const near = candidates
     .filter(o => o.id !== r.id && Math.abs(o.lat - r.lat) < 1 && distKm(o, r) < 40)
     .slice(0, 8);
@@ -631,29 +671,24 @@ function nearbySection(r) {
 
 async function search(q) {
   const results = $('#results');
-  q = normalize(q.trim());
-  if (q.length < 2) { results.hidden = true; return; }
+  if (normalize(q.trim()).length < 2) { results.hidden = true; return; }
   const entries = await store.loadSearch();
-  const words = q.split(/\s+/);
-  const scored = [];
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    if (!words.every(w => e.norm.includes(w))) continue;
-    let s = e.norm === q ? 4 : e.norm.startsWith(q) ? 3 : (' ' + e.norm).includes(' ' + words[0]) ? 2 : 1;
-    scored.push([s * 1e6 - i, e]);
-    if (scored.length > 400) break;
-  }
-  scored.sort((x, y) => y[0] - x[0]);
-  const top = scored.slice(0, 8).map(x => x[1]);
+  const top = rankSearch(entries, q);
   results.replaceChildren(...(top.length ? top.map((e, i) => {
     const li = el('li', { role: 'option', 'aria-selected': i === 0 ? 'true' : 'false', style: `--c:${catColor(e.cat)}` },
       el('span', { class: 'dot' }), el('span', { class: 'r-title' }, e.title),
-      el('span', { class: 'r-meta' }, e.kind === KIND.EVENT ? fmtYear(e.start) : `${KIND_VERB[e.kind]} ${fmtYear(e.start)}`));
+      el('span', { class: 'r-meta' }, resultMeta(e)));
     li.addEventListener('mousedown', ev => { ev.preventDefault(); chooseResult(e); });
     li._entry = e;
     return li;
   }) : [el('li', { class: 'empty' }, 'No matches among notable articles')]));
   results.hidden = false;
+}
+
+function resultMeta(e) {
+  if (e.kind >= KIND.BUILT && e.kind <= KIND.ESTABLISHED) return `${KIND_VERB[e.kind]} ${fmtYear(e.start)}`;
+  const when = e.kind === KIND.EVENT ? fmtRange(e.start, e.end) : `${KIND_VERB[e.kind]} ${fmtYear(e.start)}`;
+  return e.loc === 'world' ? `${when} · Worldwide` : when;
 }
 
 let choosing = false;
@@ -682,7 +717,7 @@ async function openEntry(e, { fly }) {
   let rec = await store.findRecord(e);
   if (!rec && isPlace) rec = await store.findStanding(e.id, e.lng, e.lat);
   if (rec?.standing) rec.isNew = rec.start >= range()[0];
-  rec = rec || { ...e, score: 1, img: '', desc: '', date: fmtYear(e.start), place: '', standing: false, minzoom: 0 };
+  rec = rec || { ...e, score: 1, img: '', desc: '', date: fmtYear(e.start), place: '', standing: false, minzoom: 0, world: e.loc === 'world' };
   // Select first, so on phones the sheet is up before the flight aims the pin above it.
   select(rec, { fly, zoom: isPlace ? 13 : e.kind === KIND.EVENT ? 8 : 9 });
 }
@@ -728,7 +763,7 @@ function syncSpanSelect() {
 
 function buildFilters() {
   $('#filters').replaceChildren(...CATEGORIES.map((c, i) => {
-    const b = el('button', { class: 'chip', 'aria-pressed': 'true', style: `--c:${catColor(i)}`, title: c.name },
+    const b = el('button', { class: 'chip', 'aria-pressed': String(state.cats.has(i)), style: `--c:${catColor(i)}`, title: c.name },
       el('span', { class: 'dot' }), c.short);
     b.addEventListener('click', e => {
       // Alt/Option-click: show only this category.
@@ -776,7 +811,7 @@ function bindChrome() {
   });
   $('#opt-borders').addEventListener('change', e => {
     state.borders = e.target.checked;
-    borders.toggle(state.borders, state.year);
+    syncBorders();
   });
 
   const sel = $('#span');

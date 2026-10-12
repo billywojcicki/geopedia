@@ -92,10 +92,14 @@ export function subline(r) {
   return r.kind === KIND.EVENT ? r.date : `${KIND_VERB[r.kind]} ${r.date}`;
 }
 
-// Longer form for cards: adds the place for births and deaths.
+// Longer form for cards: adds where, when the data says ("Born 1706 in
+// Boston", "Premiered 29 May 1913 at Théâtre des Champs-Élysées", "1789–1799 · France").
 export function metaLine(r) {
   const s = subline(r);
-  return (r.kind === KIND.BORN || r.kind === KIND.DIED) && r.place ? `${s} in ${r.place}` : s;
+  if (!r.place) return s;
+  if (r.kind === KIND.BORN || r.kind === KIND.DIED) return `${s} in ${r.place}`;
+  if (r.kind === KIND.PREMIERED || r.kind === KIND.DISCOVERED) return `${s} at ${r.place}`;
+  return `${s} · ${r.place}`;
 }
 
 // --- Wikimedia -----------------------------------------------------------------
