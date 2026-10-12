@@ -22,9 +22,11 @@ To host it, turn on GitHub Pages for the branch (Settings > Pages > Deploy from 
 ## Layout
 
 ```
-index.html, css/, js/     the site (vanilla JS modules, MapLibre GL from unpkg)
+index.html, css/, js/     the site (vanilla JS modules)
 sw.js                     service worker (caching, see Performance)
-data/                     generated data the site loads (committed)
+data/                     generated history data the site loads (committed)
+basemap/                  self-hosted world basemap, map style, label fonts (generated)
+vendor/                   MapLibre GL, served from this site (fetched by the build)
 scripts/                  data pipeline (Python 3, stdlib only)
 ```
 
@@ -34,7 +36,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 | `js/data.js` | Works out which data files a view needs and loads them |
 | `js/pins.js` | Greedy screen-space placement of labelled photo pins |
 | `js/timeline.js` | Non-linear year scrubber with a density histogram |
-| `js/basemap.js` | Restyles OpenFreeMap vector tiles, ages the map by year |
+| `js/basemap.js` | Our world basemap when zoomed out, restyled OpenFreeMap tiles when zoomed in, aged by year |
 | `js/borders.js` | Historical borders overlay |
 | `js/wiki.js` | Live Wikipedia summaries and full articles |
 
@@ -43,6 +45,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 ```sh
 python3 scripts/fetch_wikidata.py   # ~2 min, caches CSVs in build/raw/
 python3 scripts/build_data.py       # ~40 s, writes data/
+python3 scripts/build_basemap.py    # writes basemap/ and vendor/ (rarely needs rerunning)
 ```
 
 `fetch_wikidata.py --force` refetches. Queries go to the [QLever](https://qlever.dev) Wikidata endpoint, which handles the big queries the official one times out on.
@@ -63,9 +66,13 @@ Still a plain static site. The speed comes from never downloading or drawing wha
 
 So the world view downloads only the world's top items for the window, and a city view downloads only that city (every era of it, so scrubbing the timeline there needs no network at all). The search index records which file holds each item, so opening a search result is one small fetch.
 
-**Startup.** `index.html` starts fetching the data index and map style before any script runs, all JS modules are preloaded in parallel, and the app module runs before MapLibre (the biggest download) arrives, so the first view's data is already in flight. Pins and the sidebar list go up as soon as the data lands, without waiting for basemap tiles.
+**Our own world basemap.** OpenFreeMap's world-level tiles are 300-700 KB each, so the default view used to pull ~5.5 MB of tiles (plus 1.2 MB of shaded-relief images) and showed a patchy map while they arrived. Below zoom 6 the map now draws only `basemap/world.json`: Natural Earth 1:50m land, lakes, borders and labels, simplified to what those zooms can show and delta-encoded, 170 KB gzipped. OpenFreeMap tiles load only from zoom 6, where they're smaller; our coarse land stays underneath until zoom 7.5 so the sea never flashes land-coloured while they arrive. The relief layer is gone (it was also why zooming in looked blurry).
 
-**Caching.** Data URLs carry a build hash (`?v=...`), so `sw.js` serves them cache-first forever and drops old versions. Map tiles, fonts and the pinned MapLibre build are cached too. Neighbouring time chunks are prefetched, and on a good connection all world-level chunks load in the background so scrubbing the timeline zoomed out is instant.
+**One origin for the first view.** MapLibre, the map style, the world basemap and the Latin glyphs of the label font are all served from this site, so the first view needs no third-party server at all (other glyph ranges still come from OpenFreeMap when needed).
+
+**Startup.** `index.html` starts fetching the data index, map style and world basemap before any script runs, all JS modules are preloaded in parallel, and the app module runs before MapLibre (the biggest download) arrives, so the first view's data is already in flight. Pins and the sidebar list go up as soon as the data lands, without waiting for map tiles.
+
+**Caching.** Data URLs carry a build hash (`?v=...`), so `sw.js` serves them cache-first forever and drops old versions. Map tiles, fonts, the basemap and MapLibre are cached too. Neighbouring time chunks are prefetched at low network priority, and on a fast connection all world-level chunks load in the background a few seconds after startup, so scrubbing the timeline zoomed out is instant.
 
 **Main thread.** Timeline scrubbing and data arrivals are coalesced into at most one update per animation frame, and an update with nothing new skips the work. Pin placement measures text once and caches panel geometry.
 
@@ -73,15 +80,16 @@ So the world view downloads only the world's top items for the window, and a cit
 
 Measured with a headless browser and a local server that gzips like GitHub Pages (software rendering, so absolute times are pessimistic):
 
-| | Before | After |
+| | First version | Now |
 | --- | --- | --- |
-| Time to first pins | 7.1 s | 1.2 s (1.6 s on throttled 4G) |
-| Data downloaded for the first view | 1.3 MB | 0.25 MB |
+| Time to first pins | 7.1 s | ~1.3-1.7 s, nearly all of it WebGL setup in the software renderer |
+| Everything downloaded for the first view | ~8.5 MB from 3 servers | ~0.8 MB, all from this site (plus photo thumbnails) |
+| History data for the first view | 1.3 MB | 0.25 MB |
 | Data for scrubbing 1700 to 2000, zoomed out | 10.6 MB | ~2 MB (0 once prefetched) |
 | Main-thread JS per timeline step | up to 120 ms | ~1-3 ms |
-| Repeat visit, first pins | same as first | ~1.0 s, data from the service worker |
+| Repeat visit, first pins | same as first | ~1.0 s, served by the service worker |
 
-Ideas not done yet: a binary record format (JSON parsing isn't a bottleneck yet), precomputed Wikipedia extracts for the most-opened articles, and self-hosting a trimmed basemap.
+Ideas not done yet: precomputed Wikipedia extracts for the most-opened articles; a lighter tile source for zoom 6-8, where OpenFreeMap tiles are still 150-300 KB each (VersaTiles tiles are 2-4x smaller but its servers are slower); a binary record format (JSON parsing isn't a bottleneck yet).
 
 ## How the content is chosen
 
@@ -132,6 +140,6 @@ Parked for later, to decide once we've used it more:
 ## Credits
 
 - Data: [Wikidata](https://www.wikidata.org) (CC0) and [Wikipedia](https://en.wikipedia.org) (CC BY-SA 4.0), images from Wikimedia Commons (various licenses)
-- Basemap: [OpenFreeMap](https://openfreemap.org), [OpenMapTiles](https://openmaptiles.org), [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, [Natural Earth](https://www.naturalearthdata.com)
+- Basemap: [Natural Earth](https://www.naturalearthdata.com) (public domain) when zoomed out; [OpenFreeMap](https://openfreemap.org), [OpenMapTiles](https://openmaptiles.org), [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors when zoomed in. Label font: Noto Sans (SIL Open Font License)
 - Historical borders: [aourednik/historical-basemaps](https://github.com/aourednik/historical-basemaps) (GPL-3.0), loaded on demand
-- Map rendering: [MapLibre GL JS](https://maplibre.org)
+- Map rendering: [MapLibre GL JS](https://maplibre.org) (BSD-3-Clause), vendored in `vendor/`

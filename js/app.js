@@ -6,7 +6,7 @@ import {
   thumbUrl, wikiImg, wikiUrl, debounce, throttle, distKm,
 } from './util.js';
 import { Store, normalize, displayZoom } from './data.js';
-import { buildStyle, applyAge, ageFor, themeName } from './basemap.js';
+import { buildStyle, applyAge, ageFor, themeName, addGlyphProtocol } from './basemap.js';
 import { Timeline } from './timeline.js';
 import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
@@ -48,7 +48,7 @@ async function init() {
   // Phones start with the panel tucked away so the map has room.
   if (innerWidth <= 860) { document.body.classList.add('collapsed'); $('#expand').hidden = false; }
   const boot = window.__geopediaBoot || {};
-  const stylePromise = buildStyle(theme, { globe: state.globe }, boot.style);
+  const stylePromise = buildStyle(theme, { globe: state.globe }, boot);
   await store.init(boot.index);
   store.onLoad = scheduleUpdate;
 
@@ -60,6 +60,7 @@ async function init() {
   setYear(state.year); // requests the first view's data
 
   await libReady;
+  addGlyphProtocol();
   map = new maplibregl.Map({
     container: 'map',
     style: await stylePromise,
@@ -167,8 +168,8 @@ function update() {
   const view = currentView();
   const files = store.filesFor(view);
   store.ensure(files); // each file that arrives schedules another update
-  setLoading(store.pending > 0);
   const loaded = files.filter(f => store.get(f));
+  setLoading(loaded.length < files.length);
   const sig = [view.a, view.b, displayZoom(view.zoom), [...state.cats].join(''), store.long.length, loaded.join()].join('|');
   if (sig !== lastSig) {
     lastSig = sig;
@@ -204,7 +205,7 @@ function setLoading(on) {
   clearTimeout(loadingTimer);
   if (!on) { $('#timeline').classList.remove('loading'); return; }
   // Only show the spinner if loading takes long enough to notice.
-  loadingTimer = setTimeout(() => $('#timeline').classList.toggle('loading', store.pending > 0), 250);
+  loadingTimer = setTimeout(() => $('#timeline').classList.add('loading'), 250);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,26 +1,37 @@
-// Basemap: OpenFreeMap vector tiles (OpenMapTiles schema), restyled.
-// We start from their Positron style and repaint it with a softer, Apple-ish
-// palette, add Natural Earth shaded relief at low zoom, and "age" the map
-// (parchment tones, fading roads) as the timeline goes back in time.
+// Basemap, in two layers of detail:
+//
+// - Zoomed out (below BASEMAP_MAX_ZOOM): our own Natural Earth world
+//   (basemap/world.json, ~170 KB), served from this site. OpenFreeMap's
+//   world-level vector tiles are 300-700 KB each, so a first view drawn from
+//   them meant megabytes of downloads and a patchy map while they arrived.
+// - Zoomed in: OpenFreeMap vector tiles (OpenMapTiles schema), restyled from
+//   their Positron style with a softer, Apple-ish palette.
+//
+// Both "age" (parchment tones, fading roads) as the timeline goes back in time.
 
-const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
+export const BASEMAP_MAX_ZOOM = 6; // must match MAX_ZOOM in scripts/build_basemap.py
+// Our coarse land stays under the detailed tiles a little longer, so the sea
+// never flashes land-coloured while those tiles load.
+const COARSE_LAND_UNTIL = 7.5;
+const OFM_FONTS = 'https://tiles.openfreemap.org/fonts/';
+// Glyph ranges shipped in basemap/fonts (everything else comes from OpenFreeMap).
+const LOCAL_GLYPHS = { 'Noto Sans Regular': ['0-255', '256-511', '8192-8447'] };
+const FONT = ['Noto Sans Regular'];
 
 const PALETTES = {
   light: {
     background: '#f2f0eb', water: '#b4d6f1', waterLabel: '#4f7aa6', park: '#d6eacb', wood: '#dbe9d2',
     residential: '#ebe8e2', building: '#e5e2dc', buildingLine: '#d9d5ce', ice: '#fbfbfb',
     road: '#ffffff', roadCasing: '#e1ddd5', motorway: '#fde8b4', motorwayCasing: '#ecd29a',
-    minor: '#ffffff', rail: '#d9d6d0', boundary: '#b7afa4',
+    minor: '#ffffff', rail: '#d9d6d0', boundary: '#b7afa4', state: '#cfc8bd',
     label: '#3a3a3c', labelSoft: '#6e6e73', country: '#55555a', halo: 'rgba(255,255,255,0.92)',
-    relief: { opacity: 0.8, saturation: -0.25, contrast: -0.05, brightnessMin: 0.12, brightnessMax: 1 },
   },
   dark: {
     background: '#232325', water: '#1b2a3b', waterLabel: '#7a9cc0', park: '#22322a', wood: '#213027',
     residential: '#29292b', building: '#323235', buildingLine: '#3b3b3e', ice: '#3a3a3c',
     road: '#3e3e42', roadCasing: '#2c2c2f', motorway: '#6a5a36', motorwayCasing: '#4a3f27',
-    minor: '#38383b', rail: '#3a3a3d', boundary: '#5f5f64',
+    minor: '#38383b', rail: '#3a3a3d', boundary: '#5f5f64', state: '#47474b',
     label: '#d1d1d6', labelSoft: '#98989d', country: '#aeaeb2', halo: 'rgba(28,28,30,0.9)',
-    relief: { opacity: 0.45, saturation: -0.35, contrast: 0, brightnessMin: 0, brightnessMax: 0.5 },
   },
 };
 
@@ -45,20 +56,78 @@ export function themeName() {
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-// prefetched: the style JSON promise index.html started early (used once).
-export async function buildStyle(theme, { globe = true } = {}, prefetched = null) {
-  const style = structuredClone(await (prefetched || fetch(STYLE_URL).then(r => r.json())));
-  const P = PALETTES[theme];
-  const paint = (id, props) => {
-    const l = style.layers.find(x => x.id === id);
-    if (l) l.paint = { ...l.paint, ...props };
-  };
-  const layout = (id, props) => {
-    const l = style.layers.find(x => x.id === id);
-    if (l) l.layout = { ...l.layout, ...props };
-  };
+// Glyphs come through a custom protocol: Latin ranges of our label font are
+// served from this site, anything else (other scripts, other weights) from
+// OpenFreeMap.
+let protocolAdded = false;
+export function addGlyphProtocol() {
+  if (protocolAdded) return;
+  protocolAdded = true;
+  maplibregl.addProtocol('glyphs', async (params, abort) => {
+    const [, stack, range] = params.url.match(/^glyphs:\/\/(.+)\/(\d+-\d+)$/);
+    const name = decodeURIComponent(stack);
+    const local = LOCAL_GLYPHS[name]?.includes(range);
+    const url = local
+      ? new URL(`basemap/fonts/${name.toLowerCase().replace(/ /g, '-')}/${range}.pbf`, location.href).href
+      : `${OFM_FONTS}${stack}/${range}.pbf`;
+    const res = await fetch(url, { signal: abort.signal });
+    if (!res.ok) throw new Error(`glyphs ${res.status}`);
+    return { data: await res.arrayBuffer() };
+  });
+}
 
-  paint('background', { 'background-color': P.background });
+// basemap/world.json -> GeoJSON. Coordinates are delta-encoded integers
+// (hundredths of a degree; points in thousandths).
+export function decodeWorld(rows) {
+  const line = enc => {
+    const out = [];
+    let x = 0, y = 0;
+    for (let i = 0; i < enc.length; i += 2) {
+      x += enc[i];
+      y += enc[i + 1];
+      out.push([x / 100, y / 100]);
+    }
+    return out;
+  };
+  return {
+    type: 'FeatureCollection',
+    features: rows.map(([properties, t, c]) => ({
+      type: 'Feature',
+      properties,
+      geometry: t === 'pt' ? { type: 'Point', coordinates: [c[0] / 1000, c[1] / 1000] }
+        : t === 'l' ? { type: 'MultiLineString', coordinates: c.map(line) }
+          : { type: 'MultiPolygon', coordinates: c.map(poly => poly.map(line)) },
+    })),
+  };
+}
+
+// boot: { positron, world } promises started early by index.html (optional).
+// Runs before MapLibre has loaded; call addGlyphProtocol() once it has.
+export async function buildStyle(theme, { globe = true } = {}, boot = {}) {
+  const [positron, world] = await Promise.all([
+    boot.positron || fetch('basemap/positron.json').then(r => r.json()),
+    boot.world || fetch('basemap/world.json').then(r => r.json()),
+  ]);
+  const style = structuredClone(positron);
+  const P = PALETTES[theme];
+  const byId = id => style.layers.find(x => x.id === id);
+  const paint = (id, props) => { const l = byId(id); if (l) l.paint = { ...l.paint, ...props }; };
+  const layout = (id, props) => { const l = byId(id); if (l) l.layout = { ...l.layout, ...props }; };
+
+  // No sprite: drop road shields and icons, keep the labels.
+  delete style.sprite;
+  style.layers = style.layers.filter(l => !/shield|^airport$/.test(l.id));
+  for (const l of style.layers) if (l.layout) delete l.layout['icon-image'];
+  delete style.sources.ne2_shaded;
+  style.glyphs = 'glyphs://{fontstack}/{range}';
+
+  // Detailed tiles only once zoomed in: MapLibre won't fetch a tile source
+  // while none of its layers is visible.
+  for (const l of style.layers) {
+    if (l.source === 'openmaptiles') l.minzoom = Math.max(l.minzoom || 0, BASEMAP_MAX_ZOOM);
+  }
+
+  paint('background', { 'background-color': ['step', ['zoom'], P.water, COARSE_LAND_UNTIL, P.background] });
   paint('water', { 'fill-color': P.water });
   paint('park', { 'fill-color': P.park, 'fill-opacity': 0.9 });
   paint('landcover_wood', { 'fill-color': P.wood });
@@ -70,20 +139,21 @@ export async function buildStyle(theme, { globe = true } = {}, prefetched = null
   paint('road_area_pier', { 'fill-color': P.background });
   paint('road_pier', { 'line-color': P.background });
   for (const id of ['highway_path', 'highway_minor']) paint(id, { 'line-color': P.minor });
-  for (const id of ['highway_major_casing']) paint(id, { 'line-color': P.roadCasing });
-  for (const id of ['highway_major_inner']) paint(id, { 'line-color': P.road });
+  paint('highway_major_casing', { 'line-color': P.roadCasing });
+  paint('highway_major_inner', { 'line-color': P.road });
   paint('highway_major_subtle', { 'line-color': P.roadCasing });
   for (const id of ['highway_motorway_casing', 'highway_motorway_bridge_casing', 'tunnel_motorway_casing']) {
     paint(id, { 'line-color': P.motorwayCasing });
   }
   for (const id of ['highway_motorway_inner', 'highway_motorway_bridge_inner', 'tunnel_motorway_inner']) {
-    paint(id, { 'line-color': ['interpolate', ['linear'], ['zoom'], 5.8, P.roadCasing, 6, P.motorway] });
+    paint(id, { 'line-color': P.motorway });
   }
   paint('highway_motorway_subtle', { 'line-color': P.roadCasing });
   for (const id of ['railway', 'railway_transit', 'railway_service']) paint(id, { 'line-color': P.rail });
   for (const id of ['railway_dashline', 'railway_transit_dashline', 'railway_service_dashline']) paint(id, { 'line-color': P.background });
   for (const id of ['boundary_2', 'boundary_3', 'boundary_disputed']) paint(id, { 'line-color': P.boundary });
-  for (const id of ['aeroway-area', 'aeroway-runway']) paint(id, { [id === 'aeroway-area' ? 'fill-color' : 'line-color']: P.road });
+  paint('aeroway-area', { 'fill-color': P.road });
+  paint('aeroway-runway', { 'line-color': P.road });
 
   for (const l of style.layers) {
     if (l.type !== 'symbol') continue;
@@ -91,7 +161,7 @@ export async function buildStyle(theme, { globe = true } = {}, prefetched = null
     const isCountry = l.id.startsWith('label_country');
     l.paint = {
       ...l.paint,
-      'text-color': isWater ? P.waterLabel : isCountry ? P.country : /label_(other|state)|highway|waterway|airport/.test(l.id) ? P.labelSoft : P.label,
+      'text-color': isWater ? P.waterLabel : isCountry ? P.country : /label_(other|state)|highway|waterway/.test(l.id) ? P.labelSoft : P.label,
       'text-halo-color': P.halo,
       'text-halo-width': 1.4,
       'text-halo-blur': 0.4,
@@ -100,26 +170,71 @@ export async function buildStyle(theme, { globe = true } = {}, prefetched = null
     if (isCountry) layout(l.id, { 'text-transform': 'uppercase', 'text-letter-spacing': 0.12 });
   }
 
-  // Natural Earth shaded relief under everything, fading out as you zoom in.
-  // 512px tiles: a quarter of the requests, and relief is soft anyway.
-  style.sources.ne2_shaded = { ...style.sources.ne2_shaded, tileSize: 512 };
-  const bgIndex = style.layers.findIndex(l => l.id === 'background');
-  style.layers.splice(bgIndex + 1, 0, {
-    id: 'relief', type: 'raster', source: 'ne2_shaded', maxzoom: 8,
-    paint: {
-      'raster-opacity': ['interpolate', ['linear'], ['zoom'], 0, P.relief.opacity, 5, P.relief.opacity * 0.8, 7.5, 0],
-      'raster-saturation': P.relief.saturation,
-      'raster-contrast': P.relief.contrast,
-      'raster-brightness-min': P.relief.brightnessMin,
-      'raster-brightness-max': P.relief.brightnessMax,
-      'raster-fade-duration': 0,
+  // Our world: coarse land and lakes under everything, borders under the
+  // detailed labels, our labels on top.
+  style.sources.world = {
+    type: 'geojson', data: decodeWorld(world), maxzoom: BASEMAP_MAX_ZOOM, tolerance: 0.5,
+    attribution: '<a href="https://www.naturalearthdata.com" target="_blank">Natural Earth</a>',
+  };
+  const kind = k => ['==', ['get', 'k'], k];
+  const shown = ['<=', ['get', 'mz'], ['zoom']];
+  const fills = [
+    { id: 'world-land', type: 'fill', source: 'world', maxzoom: COARSE_LAND_UNTIL, filter: kind('land'), paint: { 'fill-color': P.background } },
+    { id: 'world-lakes', type: 'fill', source: 'world', maxzoom: COARSE_LAND_UNTIL, filter: ['all', kind('lake'), shown], paint: { 'fill-color': P.water } },
+  ];
+  const lines = [
+    {
+      id: 'world-states', type: 'line', source: 'world', minzoom: 3, maxzoom: BASEMAP_MAX_ZOOM,
+      filter: ['all', kind('state'), shown],
+      paint: { 'line-color': P.state, 'line-width': 0.6, 'line-dasharray': [3, 2] },
     },
-  });
+    {
+      id: 'world-borders', type: 'line', source: 'world', maxzoom: BASEMAP_MAX_ZOOM, filter: kind('border'),
+      paint: { 'line-color': P.boundary, 'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.5, 5, 1.1] },
+    },
+  ];
+  const halo = { 'text-halo-color': P.halo, 'text-halo-width': 1.4, 'text-halo-blur': 0.4 };
+  const labels = [
+    {
+      id: 'world-seas', type: 'symbol', source: 'world', maxzoom: BASEMAP_MAX_ZOOM, filter: ['all', kind('sea'), shown],
+      layout: {
+        'text-field': ['get', 'n'], 'text-font': FONT, 'text-max-width': 6, 'text-letter-spacing': 0.15,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 1, ['case', ['==', ['get', 'o'], 1], 11, 9], 5, ['case', ['==', ['get', 'o'], 1], 14, 12]],
+      },
+      paint: { 'text-color': P.waterLabel, ...halo },
+    },
+    {
+      id: 'world-cities-dot', type: 'circle', source: 'world', maxzoom: BASEMAP_MAX_ZOOM,
+      filter: ['all', kind('city'), ['<=', ['get', 'mz'], ['+', ['zoom'], 0.5]]],
+      paint: { 'circle-radius': ['case', ['==', ['get', 'cap'], 1], 2.6, 2], 'circle-color': P.labelSoft, 'circle-stroke-color': P.halo, 'circle-stroke-width': 1 },
+    },
+    {
+      id: 'world-cities', type: 'symbol', source: 'world', maxzoom: BASEMAP_MAX_ZOOM,
+      filter: ['all', kind('city'), ['<=', ['get', 'mz'], ['+', ['zoom'], 0.5]]],
+      layout: {
+        'text-field': ['get', 'n'], 'text-font': FONT, 'text-size': ['case', ['==', ['get', 'cap'], 1], 12, 11],
+        'text-anchor': 'left', 'text-offset': [0.5, 0], 'symbol-sort-key': ['get', 'mz'],
+      },
+      paint: { 'text-color': P.label, ...halo },
+    },
+    {
+      id: 'world-countries', type: 'symbol', source: 'world', maxzoom: BASEMAP_MAX_ZOOM, filter: ['all', kind('country'), shown],
+      layout: {
+        'text-field': ['get', 'n'], 'text-font': FONT, 'text-transform': 'uppercase', 'text-letter-spacing': 0.12,
+        'text-max-width': 7, 'symbol-sort-key': ['get', 'r'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 1, 9, 3, 11, 5, 13],
+      },
+      paint: { 'text-color': P.country, ...halo },
+    },
+  ];
+  const bg = style.layers.findIndex(l => l.id === 'background');
+  style.layers.splice(bg + 1, 0, ...fills);
+  const firstSymbol = style.layers.findIndex(l => l.type === 'symbol');
+  style.layers.splice(firstSymbol, 0, ...lines);
+  style.layers.push(...labels);
 
   if (globe) style.projection = { type: 'globe' };
-  style.sky = {
-    'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 0.8, 4, 0.6, 7, 0],
-  };
+  style.sky = { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 0.8, 4, 0.6, 7, 0] };
   return style;
 }
 
@@ -133,23 +248,22 @@ export function ageFor(year) {
 export function applyAge(map, theme, t) {
   const P = PALETTES[theme], A = AGED[theme];
   const set = (id, prop, val) => { if (map.getLayer(id)) map.setPaintProperty(id, prop, val); };
-  set('background', 'background-color', mix(P.background, A.background, t));
-  set('water', 'fill-color', mix(P.water, A.water, t * 0.8));
-  set('waterway', 'line-color', mix(P.water, A.water, t * 0.8));
+  const land = mix(P.background, A.background, t);
+  const water = mix(P.water, A.water, t * 0.8);
+  set('background', 'background-color', ['step', ['zoom'], water, COARSE_LAND_UNTIL, land]);
+  set('world-land', 'fill-color', land);
+  set('world-lakes', 'fill-color', water);
+  set('water', 'fill-color', water);
+  set('waterway', 'line-color', water);
   set('park', 'fill-color', mix(P.park, A.park, t));
   set('landcover_wood', 'fill-color', mix(P.wood, A.wood, t));
   set('landuse_residential', 'fill-color', mix(P.residential, A.residential, t));
   set('building', 'fill-color', mix(P.building, A.building, t));
   set('building', 'fill-opacity', 1 - 0.5 * t);
-  set('relief', 'raster-saturation', P.relief.saturation - 0.55 * t);
   const roadOpacity = 1 - 0.8 * t;
   for (const l of map.getStyle().layers) {
     if (!/^(highway|tunnel|railway|road_|aeroway)/.test(l.id)) continue;
-    if (l.type === 'symbol') {
-      set(l.id, 'text-opacity', 1 - t);
-      set(l.id, 'icon-opacity', 1 - t);
-    } else {
-      set(l.id, l.type === 'fill' ? 'fill-opacity' : 'line-opacity', roadOpacity);
-    }
+    if (l.type === 'symbol') set(l.id, 'text-opacity', 1 - t);
+    else set(l.id, l.type === 'fill' ? 'fill-opacity' : 'line-opacity', roadOpacity);
   }
 }

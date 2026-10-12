@@ -96,9 +96,11 @@ export class Pins {
       // Label on the right if it fits, else on the left.
       const right = [p.x - rad - m, p.y - hh, p.x + rad + 6 + tw + m, p.y + hh];
       const left = [p.x - rad - 6 - tw - m, p.y - hh, p.x + rad + m, p.y + hh];
+      // A label must fit on screen and not overlap anything placed already.
+      const free = b => b[0] >= 0 && b[2] <= W && b[1] >= 0 && b[3] <= H && !collides(b);
       let box = right, side = 'right';
-      if (!force && collides(right)) {
-        if (collides(left)) return;
+      if (!force && !free(right)) {
+        if (!free(left)) return;
         box = left; side = 'left';
       }
       add(box);

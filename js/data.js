@@ -58,7 +58,6 @@ export class Store {
     this.files = new Map(); // path -> records[] | Promise
     this.long = [];
     this.search = null;
-    this.pending = 0;
     this.onLoad = () => {};
   }
 
@@ -73,8 +72,8 @@ export class Store {
     return `${BASE}${path}.json${versioned ? `?v=${this.version}` : ''}`;
   }
 
-  async fetchRaw(path, versioned = true) {
-    const res = await fetch(this.url(path, versioned));
+  async fetchRaw(path, versioned = true, priority = 'auto') {
+    const res = await fetch(this.url(path, versioned), { priority });
     if (!res.ok) throw new Error(`${path}: ${res.status}`);
     return res.json();
   }
@@ -107,16 +106,16 @@ export class Store {
     return Array.isArray(v) ? v : null;
   }
 
-  load(path) {
+  // low: a prefetch, which must never slow down what's on screen.
+  load(path, low = false) {
     if (!this.files.has(path)) {
-      this.pending++;
       const standing = path.startsWith('p/');
-      const p = this.fetchRaw(path).then(rows => {
+      const p = this.fetchRaw(path, true, low ? 'low' : 'auto').then(rows => {
         const recs = rows.map(a => toRecord(a, standing));
         this.files.set(path, recs);
         return recs;
       }).catch(err => { this.files.delete(path); throw err; })
-        .finally(() => { this.pending--; this.onLoad(); });
+        .finally(() => this.onLoad());
       this.files.set(path, p);
     }
     return Promise.resolve(this.files.get(path));
@@ -159,24 +158,25 @@ export class Store {
         const hit = chunks.map(([from, to], i) => (to >= lo && from <= view.b ? i : -1)).filter(i => i >= 0);
         if (!hit.length) continue;
         for (const i of [hit[0] - 1, hit[hit.length - 1] + 1]) {
-          if (i >= 0 && i < chunks.length) this.load(`${name}/${key}-${i}`).catch(() => {});
+          if (i >= 0 && i < chunks.length) this.load(`${name}/${key}-${i}`, true).catch(() => {});
         }
       }
     }
   }
 
-  // On a good connection, quietly fetch every world-level chunk.
+  // On a fast connection, quietly fetch every world-level chunk, so scrubbing
+  // the timeline zoomed out never waits. Skipped on slow or metered links.
   prefetchWorld() {
     const c = navigator.connection;
-    if (c && (c.saveData || /2g/.test(c.effectiveType || ''))) return;
+    if (c && (c.saveData || c.effectiveType !== '4g' || c.downlink < 5)) return;
     const chunks = this.index.tiers.a.tiles['0-0'] || [];
     let i = 0;
     const next = () => {
       while (i < chunks.length && this.files.has(`a/0-0-${i}`)) i++;
       if (i >= chunks.length) return;
-      this.load(`a/0-0-${i++}`).catch(() => {}).then(() => idle(next));
+      this.load(`a/0-0-${i++}`, true).catch(() => {}).then(() => idle(next));
     };
-    idle(next);
+    setTimeout(() => idle(next), 5000); // after images and the first interactions
   }
 
   loadHist() {

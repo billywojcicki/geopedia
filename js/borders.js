@@ -8,7 +8,7 @@ const SNAPSHOTS = [
   100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1279, 1300, 1400, 1492, 1500, 1530, 1600, 1650,
   1700, 1715, 1783, 1800, 1815, 1880, 1900, 1914, 1920, 1930, 1938, 1945, 1960, 1994, 2000, 2010,
 ];
-const MODERN_LAYERS = /^(boundary_|label_country)/;
+const MODERN_LAYERS = /^(boundary_|label_country|world-(borders|states|countries))/;
 
 function fileFor(y) {
   return y < 0 ? `world_bc${-y}.geojson` : `world_${y}.geojson`;
@@ -75,7 +75,9 @@ export class Borders {
     const map = this.map;
     if (map.getSource('borders')) return;
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-    map.addSource('borders', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, tolerance: 0.6 });
+    // maxzoom 6: the outlines are approximate anyway, so deeper zooms reuse
+    // the z6 tiles instead of re-cutting the whole world on every zoom.
+    map.addSource('borders', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, tolerance: 0.6, maxzoom: 6 });
     const firstSymbol = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
     const fill = ['to-color', ['concat', 'hsl(', ['to-string', ['get', 'h']], dark ? ', 35%, 45%)' : ', 55%, 62%)']];
     map.addLayer({

@@ -405,14 +405,13 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 }
 .pin-photo.loading { background-color: color-mix(in srgb, var(--c) 22%, #fff); }
 @media (prefers-color-scheme: dark) { .pin-photo.loading { background-color: color-mix(in srgb, var(--c) 30%, #000); } }
+/* Category badge on photo pins. */
 .pin-photo::after {
   content: ""; position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; border-radius: 50%;
   background: var(--c); border: 2px solid #fff;
 }
 .pin.small .pin-photo { left: -16px; top: -16px; width: 32px; height: 32px; border-width: 2px; }
-.pin.small .pin-photo.loading { background-color: color-mix(in srgb, var(--c) 22%, #fff); }
-@media (prefers-color-scheme: dark) { .pin-photo.loading { background-color: color-mix(in srgb, var(--c) 30%, #000); } }
-.pin-photo::after { width: 10px; height: 10px; }
+.pin.small .pin-photo::after { width: 10px; height: 10px; }
 .pin.people .pin-photo { background-position: center 20%; }
 .pin-label {
   position: absolute; left: 12px; top: -15px;
@@ -430,15 +429,11 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pin-label small { display: block; font-size: 11px; line-height: 1.25; color: var(--text-2); font-weight: 500; white-space: nowrap; }
+/* Places that merely existed in this window: grey and quieter. */
 .pin.standing .pin-dot { background: #fff; border: 3px solid var(--c-standing); width: 12px; height: 12px; left: -6px; top: -6px; }
-.pin.standing .pin-photo { border-color: #fff; filter: saturate(.85); }
-.pin.standing .pin-photo.loading { background-color: color-mix(in srgb, var(--c) 22%, #fff); }
-@media (prefers-color-scheme: dark) { .pin-photo.loading { background-color: color-mix(in srgb, var(--c) 30%, #000); } }
-.pin-photo::after { background: var(--c-standing); }
-.pin.standing .pin.left .pin-label { left: auto; right: 12px; text-align: right; }
-.pin.photo.left .pin-label { left: auto; right: 27px; }
-.pin.small.photo.left .pin-label { left: auto; right: 21px; }
-.pin-label b { font-weight: 500; color: var(--text-2); }
+.pin.standing .pin-photo { filter: saturate(.85); }
+.pin.standing .pin-photo::after { background: var(--c-standing); }
+.pin.standing .pin-label b { font-weight: 500; color: var(--text-2); }
 .pin:hover .pin-dot, .pin:hover .pin-photo, .pin.hl .pin-dot, .pin.hl .pin-photo { transform: scale(1.15); }
 .pin.selected { z-index: 2; }
 .pin.selected .pin-photo, .pin.selected .pin-dot { box-shadow: 0 0 0 3px var(--c), var(--shadow-sm); }

@@ -72,6 +72,7 @@ export class Timeline {
 
   setHist(hist) {
     this.hist = hist;
+    this.cum = null;
     this.draw();
   }
 
@@ -96,20 +97,29 @@ export class Timeline {
     const ctx = c.getContext('2d');
     ctx.scale(dpr, dpr);
     const { min, counts } = this.hist;
+    // Running totals make each column's sum one subtraction.
+    if (!this.cum) {
+      this.cum = new Float64Array(counts.length + 1);
+      for (let i = 0; i < counts.length; i++) this.cum[i + 1] = this.cum[i] + counts[i];
+    }
+    const sum = (y0, y1) => {
+      const a = Math.max(0, Math.min(counts.length, y0 - min)), b = Math.max(a + 1, Math.min(counts.length, y1 - min));
+      return this.cum[b] - this.cum[a];
+    };
     const cols = Math.floor(w / 2);
     const vals = new Float64Array(cols);
+    let max = 1;
     for (let i = 0; i < cols; i++) {
-      const y0 = Math.round(posToYear(i / cols)), y1 = Math.round(posToYear((i + 1) / cols));
-      let s = 0;
-      for (let y = y0; y < Math.max(y1, y0 + 1); y++) s += counts[y - min] || 0;
-      vals[i] = Math.sqrt(s);
+      vals[i] = Math.sqrt(sum(Math.round(posToYear(i / cols)), Math.round(posToYear((i + 1) / cols))));
+      if (vals[i] > max) max = vals[i];
     }
-    const max = Math.max(...vals) || 1;
     const dark = matchMedia('(prefers-color-scheme: dark)').matches;
     ctx.fillStyle = dark ? 'rgba(235,235,245,0.22)' : 'rgba(60,60,67,0.18)';
+    const bars = new Path2D(); // one fill instead of hundreds
     for (let i = 0; i < cols; i++) {
       const bh = Math.max(1, (vals[i] / max) * (h - 4));
-      ctx.fillRect(i * 2, h - bh, 1.4, bh);
+      bars.rect(i * 2, h - bh, 1.4, bh);
     }
+    ctx.fill(bars);
   }
 }
