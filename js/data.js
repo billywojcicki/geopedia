@@ -169,6 +169,7 @@ export class Store {
   prefetchWorld() {
     const c = navigator.connection;
     if (c && (c.saveData || c.effectiveType !== '4g' || c.downlink < 5)) return;
+    if (matchMedia('(pointer: coarse)').matches) return; // phones: save data and battery
     const chunks = this.index.tiers.a.tiles['0-0'] || [];
     let i = 0;
     const next = () => {

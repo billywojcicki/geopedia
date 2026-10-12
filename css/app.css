@@ -62,7 +62,9 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+button, a, input, select { touch-action: manipulation; }
 body {
   font: 14px/1.4 var(--font);
   color: var(--text);
@@ -128,7 +130,8 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 }
 .tagline { margin: 3px 0 0; font: 12px/1.2 var(--serif); color: var(--text-2); font-style: italic; }
 
-.search { position: relative; margin: 8px 16px 4px; }
+.search-row { display: flex; align-items: center; gap: 4px; margin: 8px 10px 4px 16px; }
+.search { position: relative; flex: 1; min-width: 0; }
 .search input {
   width: 100%; height: 38px;
   padding: 0 12px 0 34px;
@@ -211,9 +214,10 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 
 /* ---------- Article ---------- */
 
+.article-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 0; }
 .back {
   display: inline-flex; align-items: center; gap: 2px;
-  margin: 10px 12px 0; padding: 6px 10px 6px 4px;
+  padding: 6px 10px 6px 4px;
   border-radius: 10px; color: var(--accent); font-weight: 500;
 }
 .back:hover { background: var(--fill); }
@@ -251,6 +255,8 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .btn.primary { background: var(--accent); color: #fff; }
 .btn.primary:hover { filter: brightness(1.08); }
 .prose { font: 15px/1.6 var(--serif); margin-top: 14px; }
+.link-btn { color: var(--link); font: inherit; padding: 0; }
+.link-btn:hover { text-decoration: underline; }
 .prose p { margin: 0 0 0.8em; }
 .prose h2, .prose h3, .prose h4 { font-family: var(--serif); font-weight: 400; margin: 1.2em 0 0.4em; border-bottom: 1px solid var(--hairline); padding-bottom: 4px; }
 .prose h2 { font-size: 22px; }
@@ -275,6 +281,8 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .nearby .thumb { width: 38px; height: 38px; border-radius: 8px; }
 .credit { margin-top: 22px; color: var(--text-3); font-size: 11.5px; }
 .credit a { color: var(--text-2); }
+
+.grabber, .brand-pill { display: none; }
 
 .expand {
   position: fixed; z-index: 10; top: var(--gap); left: var(--gap);
@@ -480,34 +488,117 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--fill-2); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---------- Small screens ---------- */
+/* ---------- Phones: the sidebar becomes a bottom sheet (js/sheet.js) ---------- */
 
-@media (max-width: 860px) {
-  :root { --gap: 10px; --sidebar-w: 100vw; }
-  #timeline { left: var(--gap) !important; right: var(--gap); padding: 8px 12px 4px; }
-  .tl-row { gap: 8px; }
-  .span-select span, .pill-btn span { display: none; }
-  .pill-btn { padding: 0 8px; }
-  .year-input { font-size: 26px; }
-  .tl-range { display: none; }
-  .ticks .minor { display: none; }
+@media (max-width: 860px) and (orientation: portrait) {
+  :root { --gap: 10px; --sidebar-w: 100vw; --peek: 76px; --safe-b: env(safe-area-inset-bottom, 0px); }
 
   #sidebar {
     top: auto; left: 0; right: 0; bottom: 0; width: auto;
-    height: 46vh; max-height: calc(100% - 150px);
-    border-radius: var(--radius) var(--radius) 0 0;
+    height: calc(100vh - 52px);
+    height: calc(100dvh - 52px);
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+    box-shadow: 0 -2px 24px rgba(0, 0, 0, 0.14);
+    transform: translateY(var(--sheet-y, calc(100% - var(--peek) - var(--safe-b))));
+    transition: transform .42s cubic-bezier(.2, .9, .25, 1);
+    will-change: transform;
     z-index: 20;
   }
-  body.collapsed #sidebar { transform: translateY(100%); }
-  body:not(.collapsed) #timeline { bottom: calc(46vh + var(--gap)); }
-  .sb-head { padding-top: 12px; }
-  .wordmark { font-size: 22px; }
-  .expand { top: auto; bottom: calc(var(--gap) + 118px); left: var(--gap); }
-  #collapse svg { transform: rotate(-90deg); }
+  #sidebar.dragging { transition: none; }
+  body.collapsed #sidebar { transform: translateY(var(--sheet-y, calc(100% - var(--peek) - var(--safe-b)))); opacity: 1; pointer-events: auto; }
+
+  /* The sheet's top parts are drag handles; the content below scrolls. */
+  .grabber { display: flex; justify-content: center; align-items: center; width: 100%; height: 20px; flex: none; cursor: grab; }
+  .grabber span { width: 38px; height: 5px; border-radius: 3px; background: var(--fill-2); }
+  .grabber, .search-row, .list-head, .article-bar { touch-action: none; user-select: none; -webkit-user-select: none; }
+  .sb-head { display: none; }
+  .search-row { margin: 0 8px 12px 14px; }
+  .search input { height: 42px; font-size: 16px; } /* 16px: iOS won't zoom on focus */
+  .search-icon { top: 13px; }
+  .results { max-height: 50vh; max-height: 50dvh; }
+  .filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px 14px 12px; }
+  .filters::-webkit-scrollbar { display: none; }
+  .chip { flex: none; }
+  .list-head { padding-top: 12px; }
+  .list-title { font-size: 18px; }
+  /* Room to scroll the last rows above the screen edge whatever the sheet height. */
+  .view::after { content: ""; display: block; height: calc(var(--sheet-hidden, 0px) + var(--safe-b)); }
+
+  /* Searching: results get the sheet to themselves. */
+  body.searching .filters, body.searching #list-view { visibility: hidden; }
+
+  /* Reading: the article gets the whole sheet. */
+  body.reading .search-row, body.reading .filters { display: none; }
+  .article-bar { position: sticky; top: 0; z-index: 2; padding: 4px 8px 6px; background: var(--glass-strong); }
+  /* Title first, so a half-open sheet shows what it is before the photo. */
+  .article { padding: 4px 18px 24px; display: flex; flex-direction: column; }
+  .article > * { order: 2; }
+  .article > .badge, .article > h2, .article > .a-date, .article > .a-desc { order: 0; }
+  .article > .hero { order: 1; aspect-ratio: 2 / 1; margin: 14px 0 0; }
+  .article > .hero.portrait { aspect-ratio: 16 / 10; }
+  .article h2 { font-size: 25px; }
+  .prose { font-size: 16.5px; }
+
+  /* The timeline floats above the peeking sheet and steps aside when it opens. */
+  #timeline {
+    left: var(--gap) !important; right: var(--gap);
+    bottom: calc(var(--peek) + var(--safe-b) + var(--gap));
+    padding: 8px 12px 4px;
+    transition: transform .35s cubic-bezier(.2, .9, .25, 1), opacity .25s;
+  }
+  body:not(.sheet-peek) #timeline { transform: translateY(24px); opacity: 0; pointer-events: none; }
+  .tl-row { gap: 8px; }
+  .span-select span, .pill-btn span { display: none; }
+  .span-select select { font-size: 16px; height: 32px; }
+  .pill-btn { padding: 0 8px; height: 32px; }
+  .year-input { font-size: 26px; }
+  .tl-range { display: none; }
+  .ticks .minor { display: none; }
+  .journeys { grid-template-columns: 1fr 1fr; max-height: 50vh; max-height: 50dvh; overflow-y: auto; right: 0; }
+
+  .brand-pill {
+    display: block; position: fixed; z-index: 10;
+    top: calc(var(--gap) + env(safe-area-inset-top, 0px)); left: var(--gap);
+    padding: 6px 13px 7px; border-radius: 14px;
+    font: 400 18px/1 var(--serif); font-variant: small-caps; letter-spacing: 0.02em;
+    pointer-events: none;
+  }
+  .controls { top: calc(var(--gap) + env(safe-area-inset-top, 0px)); }
+  .expand { display: none !important; }
   .hovercard { display: none; }
 }
-@media (max-width: 860px) and (prefers-color-scheme: dark) {
-  .expand { color: var(--text); }
+
+/* Landscape phones: the side panel, compacted. */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root { --gap: 8px; --sidebar-w: 300px; }
+  .sb-head { padding: 10px 8px 2px 16px; }
+  .tagline { display: none; }
+  .wordmark { font-size: 20px; }
+  .filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 6px 14px 8px; }
+  .filters::-webkit-scrollbar { display: none; }
+  .chip { flex: none; }
+  .list-head { padding: 8px 16px 2px; }
+  #timeline { padding: 6px 12px 2px; }
+  .year-input { font-size: 22px; }
+  .tl-range, .span-select span, .pill-btn span { display: none; }
+  .track { height: 50px; }
+  .track canvas, .window { height: 30px; }
+  .handle { height: 36px; }
+  .handle::after { top: 28px; }
+  .ticks { top: 34px; }
+  .ticks .minor { display: none; }
+  body.reading .search-row, body.reading .filters { display: none; }
+  .hero { aspect-ratio: 2 / 1; }
+}
+
+/* Touch: bigger targets, no zoom buttons (pinch instead), no hover cards. */
+@media (pointer: coarse) {
+  .hovercard { display: none; }
+  .ctl-group.zoom { display: none; }
+  .pin-dot::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; }
+  .pin-label { pointer-events: auto; }
+  .chip { height: 34px; padding: 0 13px 0 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

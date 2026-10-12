@@ -6,7 +6,8 @@ A map of history. Scroll around the world, drag the timeline, and see the Wikipe
 - **Zoomed in** on a city you get the local stuff: every battle, riot, treaty, building and birth that Wikipedia knows about there, plus the places that already existed at that point in time.
 - **The timeline** picks a year and a window around it (auto-sized by era, or pick your own). The map tints toward parchment and fades modern roads as you go back.
 - **Click anything** to read the Wikipedia summary in the side panel, or the full article inline.
-- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders overlay, shareable URLs, play button, light/dark mode, phone layout.
+- Extras: search (`/`), "Surprise me", curated Journeys (American Revolution, WWII...), historical borders overlay, shareable links (Share button on every article), play button, light/dark mode.
+- **On phones** the panel is a bottom sheet (peek, half, full) you drag by its top. Tapping a pin opens the article at half height with the pin centred in the map above it; tapping the map or swiping down puts it away.
 
 ## Run it
 
@@ -35,6 +36,7 @@ scripts/                  data pipeline (Python 3, stdlib only)
 | `js/app.js` | State, map layers, sidebar list, article panel, search, URL state |
 | `js/data.js` | Works out which data files a view needs and loads them |
 | `js/pins.js` | Greedy screen-space placement of labelled photo pins |
+| `js/sheet.js` | Phone bottom sheet: snap points, drag with momentum |
 | `js/timeline.js` | Non-linear year scrubber with a density histogram |
 | `js/basemap.js` | Our world basemap when zoomed out, restyled OpenFreeMap tiles when zoomed in, aged by year |
 | `js/borders.js` | Historical borders overlay |
@@ -46,9 +48,20 @@ scripts/                  data pipeline (Python 3, stdlib only)
 python3 scripts/fetch_wikidata.py   # ~2 min, caches CSVs in build/raw/
 python3 scripts/build_data.py       # ~40 s, writes data/
 python3 scripts/build_basemap.py    # writes basemap/ and vendor/ (rarely needs rerunning)
+node scripts/social_card.mjs URL    # optional: re-shoot og.jpg and icons/ (needs Playwright)
 ```
 
 `fetch_wikidata.py --force` refetches. Queries go to the [QLever](https://qlever.dev) Wikidata endpoint, which handles the big queries the official one times out on.
+
+## Phones and in-app browsers
+
+Built for the X / Twitter in-app browser as much as for Safari and Chrome:
+
+- Bottom sheet instead of a sidebar in portrait; landscape phones get a compact side panel. Search opens the sheet fully; reading hides search, filters and the timeline.
+- Uses dynamic viewport units and safe-area insets, so nothing sits under a notch, home bar or in-app toolbar. The search box is 16px so iOS doesn't zoom in on focus; pinching over the panels doesn't zoom the page.
+- Touch targets: dot pins have a bigger invisible hit area and labels are tappable; no zoom buttons (pinch) and no hover cards on touch.
+- The map renders at most at 2x pixel density (phones report 3x; it looks the same and draws much faster), and the background world prefetch is skipped on touch devices to save data.
+- Link previews: Open Graph and Twitter card tags with `og.jpg` (a real screenshot) and app icons. The tags point at `https://billywojcicki.github.io/geopedia/`; change them in `index.html` if the site moves to another domain.
 
 ## Performance
 
