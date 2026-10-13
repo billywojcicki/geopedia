@@ -1,0 +1,44 @@
+/* The site's own UI is hidden: the trailer draws its own. */
+#sidebar, .controls, #timeline, #expand, .brand-pill, #hovercard, .maplibregl-ctrl-attrib,
+.maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left, .toast, #map .space-fx { display: none !important; }
+body.tr-nopins .maplibregl-marker { opacity: 0 !important; transition: opacity .25s; }
+
+#tr { position: fixed; inset: 0; pointer-events: none; z-index: 1000; font-family: Inter, sans-serif; overflow: hidden; }
+#tr .vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 56%, rgba(0,0,0,.55) 100%); }
+#tr .flash { position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at 50% 50%, #fff 0%, #fff7ea 45%, #ffd6a0 100%); }
+
+#tr .counter {
+  position: absolute; left: 92px; bottom: 116px; color: #fff; transform-origin: left bottom;
+  font: 200 150px/1 "Inter Display", Inter, sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em;
+  text-shadow: 0 4px 40px rgba(0,0,0,.75);
+}
+#tr .counter small { font-size: .36em; font-weight: 400; letter-spacing: .14em; margin: 0 .35em; opacity: .85; }
+
+/* Callouts: a ring and dot on the spot, a leader line, a card with the photo. */
+#tr .co { position: absolute; left: 0; top: 0; }
+#tr .co-ring { position: absolute; left: -30px; top: -30px; width: 60px; height: 60px; border-radius: 50%;
+  border: 3px solid var(--c); box-shadow: 0 0 22px var(--c), inset 0 0 12px var(--c); }
+#tr .co-dot { position: absolute; left: -10px; top: -10px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--c); border: 3px solid #fff; box-sizing: border-box; box-shadow: 0 0 18px var(--c); }
+#tr .co-line { position: absolute; left: 0; top: -1.5px; height: 3px; background: #fff; transform-origin: 0 50%;
+  box-shadow: 0 0 10px rgba(0,0,0,.6); }
+#tr .co-card { position: absolute; left: 0; top: 0; width: 360px; border-radius: 18px; overflow: hidden;
+  background: rgba(12,16,26,.8); border: 1px solid rgba(255,255,255,.18);
+  box-shadow: 0 20px 70px rgba(0,0,0,.6), 0 0 0 1px rgba(0,0,0,.2); backdrop-filter: blur(14px); }
+#tr .co-img { height: 210px; background-size: cover; background-position: center; }
+#tr .co-text { padding: 16px 20px 18px; border-top: 3px solid var(--c); }
+#tr .co-d { font: 700 19px/1 Inter, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--c); filter: brightness(1.35) saturate(1.2); }
+#tr .co-t { margin-top: 9px; font: 700 30px/1.1 "Inter Display", Inter, sans-serif; letter-spacing: -.01em; color: #fff; }
+
+/* Copy. */
+#tr .t { position: absolute; left: 0; right: 0; text-align: center; color: #fff; opacity: 0;
+  text-shadow: 0 4px 34px rgba(0,0,0,.65); font-family: "Inter Display", Inter, sans-serif; }
+#tr .dawn-year { top: 19%; font-weight: 200; font-size: 112px; line-height: 1; letter-spacing: .42em; padding-left: .42em; }
+#tr .pay { left: 55%; right: 3%; text-align: left; line-height: 1; }
+#tr .pay1 { top: 29%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; }
+#tr .pay2 { top: 44%; font-weight: 300; font-size: 72px; letter-spacing: -.01em; }
+#tr .pay3 { top: 55.5%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; text-shadow: none;
+  background: linear-gradient(90deg, #ffd27a, #ff5fa2 55%, #8f7bff); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 4px 24px rgba(0,0,0,.6)); }
+#tr .logo { top: 388px; font-weight: 700; font-size: 176px; line-height: 1; letter-spacing: -.02em; }
+#tr .tag { top: 606px; font-weight: 300; font-size: 48px; line-height: 1.2; letter-spacing: .05em; color: rgba(255,255,255,.88); }

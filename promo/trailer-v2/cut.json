@@ -1,0 +1,61 @@
+{
+  "url": "http://127.0.0.1:8766/",
+  "duration": 30,
+  "bpm": 120,
+  "note": "Times are seconds. At 120 BPM a beat is 0.5 s and a bar is 2 s.",
+
+  "race": { "t0": 0, "t1": 4, "center": [44, 24], "zoom": [-0.4, 0.95] },
+  "dawn": {
+    "t0": 4, "t1": 8, "center": [44.4, 24], "zoom": [3.55, 3.72], "pitch": 80,
+    "glow": 4.4, "sunrise": [5.6, 7.4], "light": [6.2, 7.6],
+    "comet": [6.55, 7.96], "push": [7.55, 7.96]
+  },
+  "impact": { "t": 8, "at": [44.42, 32.54] },
+
+  "rush": {
+    "t0": 8, "t1": 24, "from": -2999, "to": 2026, "offset": 75,
+    "keys": [
+      [8.0, 35, 31, 4.40],
+      [9.5, 36, 32.5, 4.25],
+      [11.5, 37, 36, 3.95],
+      [12.5, 40, 37, 3.82],
+      [14.0, 80, 38, 3.60],
+      [15.5, 122, 37, 3.40],
+      [16.5, 150, 33, 3.25],
+      [17.5, 205, 30, 3.10],
+      [18.5, 272, 36, 2.95],
+      [19.5, 300, 40, 2.80],
+      [20.5, 318, 43, 2.68],
+      [21.5, 352, 46, 2.55],
+      [22.5, 375, 47, 2.42],
+      [24.0, 397, 40, 2.25],
+      [25.0, 405, 37, 2.15],
+      [26.9, 416, 33, 2.02]
+    ]
+  },
+
+  "payoff": { "t0": 24, "slide": [24.1, 24.9], "padRight": 700, "back": [26.9, 27.4], "implode": [26.95, 27.96] },
+  "end": { "t": 28 },
+
+  "callouts": [
+    { "t": 8.5,  "side": "left",  "title": "Great Pyramid of Giza", "date": "2560 BC", "at": [31.1342, 29.9792], "cat": "built", "img": "e/e3/Kheops-Pyramid.jpg" },
+    { "t": 9.0,  "side": "right", "title": "Code of Hammurabi", "date": "1754 BC", "at": [44.4209, 32.5363], "cat": "politics", "img": "9/94/P1050763_Louvre_code_Hammurabi_face_rwk-gradient.jpg" },
+    { "t": 10.5, "side": "right", "title": "Battle of Marathon", "date": "490 BC", "at": [23.9783, 38.1181], "cat": "conflict", "img": "9/99/Scene_of_the_Battle_of_Marathon.jpg" },
+    { "t": 11.25, "side": "left", "title": "Assassination of Julius Caesar", "date": "44 BC", "at": [12.4769, 41.8953], "cat": "politics", "img": "0/0a/Vincenzo_Camuccini,_The_Death_of_Julius_Caesar_(detail).jpg" },
+    { "t": 12.5, "side": "right", "title": "Hagia Sophia", "date": "AD 537", "at": [28.98, 41.0083], "cat": "built", "img": "2/22/Hagia_Sophia_Mars_2013.jpg" },
+    { "t": 15.5, "side": "right", "title": "Forbidden City", "date": "1420", "at": [116.3908, 39.9158], "cat": "built", "img": "2/23/Hall_of_Supreme_Harmony_(20241127120000).jpg" },
+    { "t": 18.5, "side": "right", "title": "Declaration of Independence", "date": "1776", "at": [-75.15, 39.9489], "cat": "politics", "img": "8/8f/United_States_Declaration_of_Independence.jpg" },
+    { "t": 20.5, "side": "left",  "title": "Sinking of the Titanic", "date": "1912", "at": [-49.9458, 41.7319], "cat": "disaster", "img": "f/fd/RMS_Titanic_3.jpg" },
+    { "t": 21.25, "side": "right", "title": "D-Day", "date": "1944", "at": [-0.6, 49.34], "cat": "conflict", "img": "a/a5/Into_the_Jaws_of_Death_23-0455M_edit.jpg" },
+    { "t": 22.5, "side": "right", "title": "Fall of the Berlin Wall", "date": "1989", "at": [13.4044, 52.5186], "cat": "politics", "img": "2/25/BerlinWall-BrandenburgGate.jpg" }
+  ],
+
+  "texts": [
+    { "id": "bc", "cls": "dawn-year", "html": "3000 BC", "t0": 5.0, "t1": 7.7, "fade": 0.6 },
+    { "id": "years", "cls": "pay pay1", "html": "5,000 years.", "t0": 24.25, "t1": 26.95, "fade": 0.25 },
+    { "id": "moments", "cls": "pay pay2", "html": "200,000 moments.", "t0": 24.95, "t1": 26.95, "fade": 0.25 },
+    { "id": "onemap", "cls": "pay pay3", "html": "One map.", "t0": 25.7, "t1": 26.95, "fade": 0.25 },
+    { "id": "logo", "cls": "logo", "html": "Geopedia", "t0": 28.0, "t1": 99, "fade": 0.35 },
+    { "id": "tag", "cls": "tag", "html": "The free atlas of history", "t0": 28.45, "t1": 99, "fade": 0.5 }
+  ]
+}
