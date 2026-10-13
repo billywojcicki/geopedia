@@ -8,7 +8,7 @@ OUT=${2:-geopedia-trailer.mp4}
 FPS=${FPS:-30}
 DIR=$(dirname "$0")
 ffmpeg -y -loglevel error \
-  -framerate "$FPS" -i "$FRAMES/f%04d.png" \
+  -framerate "$FPS" -i "$FRAMES/f%04d.jpg" \
   -i "$DIR/music/music.wav" \
   -filter_complex "[0:v]split[a][b];[b]gblur=sigma=14[g];[a][g]blend=all_mode=screen:all_opacity=0.16,noise=alls=5:allf=t,format=yuv420p[v]" \
   -map "[v]" -map 1:a \

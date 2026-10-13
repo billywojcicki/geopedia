@@ -9,47 +9,45 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const [,, dir, workersArg] = process.argv;
-const WORKERS = Number(workersArg ?? 3), CHUNK = 40, STALL_MS = 120000;
+const WORKERS = Number(workersArg ?? 3), CHUNK = 60, STALL_MS = 120000;
 const cfg = JSON.parse(fs.readFileSync(path.join(here, 'cut.json'), 'utf8'));
 const total = Math.round(cfg.duration * Number(process.env.FPS || 30));
 fs.mkdirSync(dir, { recursive: true });
-const have = f => fs.existsSync(path.join(dir, `f${String(f).padStart(4, '0')}.png`));
+const have = f => fs.existsSync(path.join(dir, `f${String(f).padStart(4, '0')}.jpg`));
 
+// Windows of up to CHUNK frames, each listing the frames it still needs
+// (they can be sparse: a 15 fps draft fills every other frame of 30 fps).
 function chunks() {
   const out = [];
-  for (let f = 0; f < total; f++) {
-    if (have(f)) continue;
-    const last = out.at(-1);
-    if (last && last[1] === f && f - last[0] < CHUNK) last[1] = f + 1;
-    else out.push([f, f + 1]);
+  for (let f = 0; f < total;) {
+    if (have(f)) { f++; continue; }
+    const b = Math.min(total, f + CHUNK), miss = [];
+    for (let g = f; g < b; g++) if (!have(g)) miss.push(g);
+    out.push(miss);
+    f = b;
   }
   return out;
 }
 
 const queue = chunks();
-console.log(`${queue.length} chunks, ${queue.reduce((n, [a, b]) => n + b - a, 0)} frames to render`);
+console.log(`${queue.length} chunks, ${queue.reduce((n, c) => n + c.length, 0)} frames to render`);
 
-function run([a, b]) {
+function run(miss) {
   return new Promise(res => {
-    const p = spawn('node', [path.join(here, 'capture.mjs'), dir, String(a), String(b)], { stdio: 'ignore' });
+    const a = miss[0], b = miss.at(-1) + 1;
+    const p = spawn('node', [path.join(here, 'capture.mjs'), dir, String(a), String(b)],
+      { stdio: 'ignore', env: { ...process.env, FRAMES: miss.join(',') } });
     let count = 0, lastProgress = Date.now();
     const timer = setInterval(() => {
-      let n = 0;
-      for (let f = a; f < b; f++) if (have(f)) n++;
+      const n = miss.filter(have).length;
       if (n !== count) { count = n; lastProgress = Date.now(); }
       if (Date.now() - lastProgress > STALL_MS) { console.log(`stall in ${a}-${b} at ${count} done: restarting`); p.kill('SIGKILL'); }
     }, 5000);
     p.on('exit', () => {
       clearInterval(timer);
-      // Whatever is still missing in this range goes back in the queue.
-      let f = a;
-      while (f < b) {
-        if (have(f)) { f++; continue; }
-        let g = f;
-        while (g < b && !have(g)) g++;
-        queue.push([f, g]);
-        f = g;
-      }
+      // Whatever is still missing goes back in the queue.
+      const left = miss.filter(f => !have(f));
+      if (left.length) queue.push(left);
       res();
     });
   });

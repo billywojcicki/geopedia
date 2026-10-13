@@ -18,7 +18,7 @@ const [,, outDir, fromArg, toArg] = process.argv;
 const total = Math.round(cfg.duration * FPS);
 const from = Number(fromArg ?? 0), to = Math.min(total, Number(toArg ?? total));
 fs.mkdirSync(outDir, { recursive: true });
-const DEBUG = !!process.env.DEBUG;
+const DEBUG = !!process.env.DEBUG, PROFILE = !!process.env.PROFILE;
 
 // Callout photos come from cache/ (fetch-images.sh fills it).
 const cacheDir = process.env.CACHE || path.join(here, 'cache');
@@ -104,19 +104,24 @@ for (let f = Math.max(0, from - 4); f < from; f++) { await apply(f); await raf()
 const only = process.env.FRAMES ? new Set(process.env.FRAMES.split(',').map(Number)) : null;
 for (let f = from; f < to; f++) {
   if (only && !only.has(f)) continue;
+  const t0 = Date.now();
   const s = await apply(f);
   await raf();
+  const t1 = Date.now();
   // Wait for tiles and data (capped: a stuck tile must not stop the run).
-  const tries = f === from || only ? 300 : DRAFT ? 80 : 200;
-  for (let k = 0; k < tries; k++) {
+  const tries = f === from ? 300 : DRAFT ? 80 : 200;
+  let k = 0;
+  for (; k < tries; k++) {
     if (await ready()) break;
     await page.waitForTimeout(40);
   }
-  await raf();
+  const t2 = Date.now();
   await settlePins(f / FPS);
   await raf();
-  const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  fs.writeFileSync(path.join(outDir, `f${String(f).padStart(4, '0')}.png`), Buffer.from(shot.data, 'base64'));
-  if (DEBUG || f % 15 === 0) console.log('frame', f, 't', (f / FPS).toFixed(2), 'year', s.year);
+  // JPEG at 95: much quicker than PNG, and the video is lossy anyway.
+  const shot = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 95 });
+  fs.writeFileSync(path.join(outDir, `f${String(f).padStart(4, '0')}.jpg`), Buffer.from(shot.data, 'base64'));
+  if (PROFILE) console.log('frame', f, 'apply', t1 - t0, 'wait', t2 - t1, `(${k})`, 'shot', Date.now() - t2);
+  else if (DEBUG || f % 15 === 0) console.log('frame', f, 't', (f / FPS).toFixed(2), 'year', s.year);
 }
 await browser.close();
