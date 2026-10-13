@@ -118,6 +118,7 @@ window.TR = (() => {
     return { x: vp[0] + Math.cos(th) * rho * F / z, y: vp[1] + Math.sin(th) * rho * F / z, z };
   }
   function drawRace(t) {
+    t += 0.6; // a cold open: the comets are already in flight on frame one
     const vp = proj(cfg.race.center);
     // Warp streaks: dust rushing past the camera.
     fx.globalCompositeOperation = 'lighter';
