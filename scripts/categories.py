@@ -315,7 +315,8 @@ NOT_EVENTS = [
 # Single items that are left out: duplicates of an event already on the map
 # (the Japanese Instrument of Surrender, COVID-19 the disease), phrases (Alea
 # iacta est, Vae victis), and things no class rule catches (Tequila, a caldera).
-DROP_ITEMS = {"Q665554", "Q84263196", "Q271723", "Q922557", "Q122195", "Q2071883"}
+DROP_ITEMS = {"Q665554", "Q84263196", "Q271723", "Q922557", "Q122195", "Q2071883",
+              "Q693604", "Q4120118"}  # Tarawih, Tahajjud: prayers Wikidata files as written works
 
 # Famous moments the rules would leave out (the Wow! signal is a signal,
 # RDS-1 and the Tsar Bomba bombs, the Radium Girls a group of people, the

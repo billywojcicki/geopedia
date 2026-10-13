@@ -309,6 +309,85 @@ SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) {PACKED_DATE}
 }} GROUP BY ?item{" HAVING (MAX(?s) >= 10)" if kind == "launches" else ""}"""
 
 
+# Objects made before 1700, where they were made or else where they were found:
+# the Rosetta Stone in 196 BC, the Nebra sky disc, the Book of Kells. Physical
+# things only, not ideas with a "place of creation" (Protestantism, the Hebrew
+# alphabet), and not ships or fossils. The place is packed as "how|place|point|label",
+# how 1 for where it was made and 2 for where it was found, so MIN prefers the first.
+MADE_BEFORE = 1700
+QUERIES["made"] = f"""
+SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) {PACKED_DATE} (MIN(?placepack) AS ?place)
+       (SAMPLE(?img) AS ?image) (SAMPLE(?d) AS ?desc) WHERE {{
+  ?item wikibase:sitelinks ?s .
+  {ENWIKI} ?article schema:name ?ti .
+  {dated("P571")}
+  FILTER(YEAR(?tv) < {MADE_BEFORE})
+  {PACK}
+  ?item wdt:P31/wdt:P279* wd:Q223557 .  # physical object
+  FILTER NOT EXISTS {{ ?item wdt:P31/wdt:P279* ?_n VALUES ?_n {{ wd:Q1229765 wd:Q40614 wd:Q9174 wd:Q8192 wd:Q811979 }} }}
+  {{ ?item wdt:P1071 ?pl BIND(1 AS ?how) }} UNION {{ ?item wdt:P189 ?pl BIND(2 AS ?how) }}
+  ?pl wdt:P625 ?co .
+  FILTER NOT EXISTS {{ ?pl wdt:P31 ?_b VALUES ?_b {{ {BIG_CLASSES} }} }}
+  FILTER NOT EXISTS {{ ?pl wdt:P31/wdt:P279* wd:Q3024240 }}  # a historical state (the Yuan dynasty), not a place
+  OPTIONAL {{ ?pl rdfs:label ?pll FILTER(LANG(?pll) = "en") }}
+  BIND(CONCAT(STR(?how), "|", STR(?pl), "|", STR(?co), "|", COALESCE(?pll, "")) AS ?placepack)
+  OPTIONAL {{ ?item wdt:P18 ?img }}
+  OPTIONAL {{ ?item schema:description ?d FILTER(LANG(?d) = "en") }}
+}} GROUP BY ?item"""
+
+
+# Written works before 1700, where they were written or else first published:
+# The Prince, the Principia, al-Khwarizmi's Al-Jabr at the House of Wisdom.
+# Not scripture (the Quran, the Vedas). Place packed as for "made".
+QUERIES["written"] = f"""
+SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) (MIN(?packed) AS ?date) (MIN(?placepack) AS ?place)
+       (SAMPLE(?img) AS ?image) (SAMPLE(?d) AS ?desc) WHERE {{
+  ?item wikibase:sitelinks ?s .
+  {ENWIKI} ?article schema:name ?ti .
+  ?item wdt:P31/wdt:P279* wd:Q47461344 .  # written work
+  FILTER NOT EXISTS {{ ?item wdt:P31/wdt:P279* ?_n VALUES ?_n {{ wd:Q179461 wd:Q9174 }} }}
+  # (Plain dates, to the year: the statement-level join times out here.)
+  {{ ?item wdt:P571 ?tv }} UNION {{ ?item wdt:P577 ?tv }}
+  FILTER(YEAR(?tv) < {MADE_BEFORE})
+  BIND(CONCAT("http://wikiba.se/ontology#NormalRank|", STR(?tv), "|9|http://www.wikidata.org/entity/Q1985727") AS ?packed)
+  {{ ?item wdt:P1071 ?pl BIND(1 AS ?how) }} UNION {{ ?item wdt:P291 ?pl BIND(2 AS ?how) }}
+  ?pl wdt:P625 ?co .
+  FILTER NOT EXISTS {{ ?pl wdt:P31 ?_b VALUES ?_b {{ {BIG_CLASSES} }} }}
+  FILTER NOT EXISTS {{ ?pl wdt:P31/wdt:P279* wd:Q3024240 }}  # a historical state (the Yuan dynasty), not a place
+  OPTIONAL {{ ?pl rdfs:label ?pll FILTER(LANG(?pll) = "en") }}
+  BIND(CONCAT(STR(?how), "|", STR(?pl), "|", STR(?co), "|", COALESCE(?pll, "")) AS ?placepack)
+  OPTIONAL {{ ?item wdt:P18 ?img }}
+  OPTIONAL {{ ?item schema:description ?d FILTER(LANG(?d) = "en") }}
+}} GROUP BY ?item"""
+
+
+# Organizations founded before 1900 that have no coordinates of their own,
+# placed where they were formed or, once defunct, at their seat (the Dutch East
+# India Company at the Oost-Indisch Huis, the Knights Templar on the Temple
+# Mount). A living organization's seat is today's (HSBC in Canary Wharf), so
+# it doesn't count. Not sports clubs, dioceses or religions.
+ORGS_BEFORE = 1900
+QUERIES["orgs"] = f"""
+SELECT ?item (SAMPLE(?ti) AS ?title) (SAMPLE(?s) AS ?sl) {PACKED_DATE} (MIN(?placepack) AS ?place)
+       (GROUP_CONCAT(DISTINCT STR(?cls); SEPARATOR=" ") AS ?classes) (SAMPLE(?img) AS ?image) (SAMPLE(?d) AS ?desc) WHERE {{
+  ?item wikibase:sitelinks ?s .
+  {ENWIKI} ?article schema:name ?ti .
+  {dated("P571")}
+  FILTER(YEAR(?tv) < {ORGS_BEFORE})
+  {PACK}
+  FILTER NOT EXISTS {{ ?item wdt:P625 [] }}
+  ?item wdt:P31/wdt:P279* wd:Q43229 .
+  FILTER NOT EXISTS {{ ?item wdt:P31/wdt:P279* ?_n VALUES ?_n {{ wd:Q847017 wd:Q9174 wd:Q665487 }} }}
+  {{ ?item wdt:P740 ?pl BIND(1 AS ?how) }} UNION {{ ?item wdt:P159 ?pl ; wdt:P576 [] BIND(2 AS ?how) }}
+  ?pl wdt:P625 ?co .
+  FILTER NOT EXISTS {{ ?pl wdt:P31 ?_b VALUES ?_b {{ {BIG_CLASSES} }} }}
+  BIND(CONCAT(STR(?how), "|", STR(?co)) AS ?placepack)
+  ?item wdt:P31 ?cls .
+  OPTIONAL {{ ?item wdt:P18 ?img }}
+  OPTIONAL {{ ?item schema:description ?d FILTER(LANG(?d) = "en") }}
+}} GROUP BY ?item"""
+
+
 # Ships that sank, dated by the "significant event" statement (Wikidata has
 # no sinking date property) and pinned on the wreck: the Mary Rose, the Vasa,
 # the Lusitania. Islands where ships were wrecked are not watercraft.

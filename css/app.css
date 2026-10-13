@@ -557,9 +557,9 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   .search input { height: 42px; font-size: 16px; } /* 16px: iOS won't zoom on focus */
   .search-icon { top: 13px; }
   .results { max-height: 50vh; max-height: 50dvh; }
-  .filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 2px 14px 12px; }
-  .filters::-webkit-scrollbar { display: none; }
-  .chip { flex: none; }
+  /* Two rows, so every category shows without a sideways scroll. */
+  .filters { gap: 6px 5px; padding: 2px 14px 12px; }
+  .filters .chip { height: 32px; padding: 0 10px 0 9px; gap: 5px; }
   .list-head { padding-top: 12px; }
   .list-title { font-size: 18px; }
   /* Room to scroll the last rows above the screen edge whatever the sheet height. */

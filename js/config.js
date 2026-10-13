@@ -13,10 +13,10 @@ export const CATEGORIES = [
 ];
 
 // Record kinds (index = kind code in the data files).
-export const KIND_VERB = ['', 'Built', 'Founded', 'Established', 'Born', 'Died', 'Premiered', 'Discovered', 'Launched', 'Sank'];
-export const KIND = { EVENT: 0, BUILT: 1, FOUNDED: 2, ESTABLISHED: 3, BORN: 4, DIED: 5, PREMIERED: 6, DISCOVERED: 7, LAUNCHED: 8, SANK: 9 };
+export const KIND_VERB = ['', 'Built', 'Founded', 'Established', 'Born', 'Died', 'Premiered', 'Discovered', 'Launched', 'Sank', 'Made', 'Written'];
+export const KIND = { EVENT: 0, BUILT: 1, FOUNDED: 2, ESTABLISHED: 3, BORN: 4, DIED: 5, PREMIERED: 6, DISCOVERED: 7, LAUNCHED: 8, SANK: 9, MADE: 10, WRITTEN: 11 };
 // Things that happened, as opposed to places and lives (which rank lower).
-export const HAPPENED = new Set([KIND.EVENT, KIND.PREMIERED, KIND.DISCOVERED, KIND.LAUNCHED, KIND.SANK]);
+export const HAPPENED = new Set([KIND.EVENT, KIND.PREMIERED, KIND.DISCOVERED, KIND.LAUNCHED, KIND.SANK, KIND.MADE, KIND.WRITTEN]);
 
 export const MIN_YEAR = -10000;
 export const MAX_YEAR = 2026;
@@ -34,10 +34,10 @@ export function autoSpan(y) {
   if (y >= 1900) return 2;
   if (y >= 1700) return 5;
   if (y >= 1500) return 10;
-  if (y >= 1000) return 20;
-  if (y >= 0) return 40;
-  if (y >= -1000) return 75;
-  return 150;
+  if (y >= 1000) return 25;
+  if (y >= 0) return 50;
+  if (y >= -1000) return 100;
+  return 200;
 }
 
 // Zoom at which places that merely *existed* (not founded in the window) appear.

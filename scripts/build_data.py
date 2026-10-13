@@ -26,6 +26,7 @@ Usage: python3 scripts/build_data.py
 """
 import csv
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -46,8 +47,8 @@ csv.field_size_limit(1 << 24)
 
 CAT = {c: i for i, c in enumerate(CATEGORIES)}
 # kind codes (js/config.js KIND_VERB must match)
-EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED, PREMIERED, DISCOVERED, LAUNCHED, SANK = range(10)
-HAPPENED = {EVENT, PREMIERED, DISCOVERED, LAUNCHED, SANK}  # things that happened, as opposed to places and lives
+EVENT, BUILT, FOUNDED, ESTABLISHED, BORN, DIED, PREMIERED, DISCOVERED, LAUNCHED, SANK, MADE, WRITTEN = range(12)
+HAPPENED = {EVENT, PREMIERED, DISCOVERED, LAUNCHED, SANK, MADE, WRITTEN}  # things that happened, as opposed to places and lives
 
 LONG_SPAN = 25  # years; longer happenings go to long.json
 SEARCH_MAX = 40000  # happenings in the search index
@@ -87,6 +88,8 @@ WEIGHT = {
     "discovery": 0.9,
     "launch": 0.9,
     "wreck": 0.9,
+    "made": 0.8,  # an object made where it was made or found (the Rosetta Stone, 196 BC)
+    "written": 0.8,  # a work where it was written or published (The Prince, 1513)
     # Places and people collect sitelinks far more easily than events (every
     # language edition has an article on every city), and they're the backdrop
     # rather than the story, so they're scaled well down.
@@ -147,6 +150,12 @@ WORLDWIDE_MIN_SITELINKS = 25  # events spread over several regions must be this 
 WIDE_VOYAGE_MIN_SITELINKS = 10  # voyages and expeditions are spread out by nature (Columbus, da Gama)
 WORLD_KM = 5000  # places further apart than this: a worldwide event, not pinned
 NATIONWIDE_MIN_SITELINKS = 10  # events known only by country must be this notable
+# Fewer Wikipedias write about early history, so its sitelinks run low: before
+# 1500 the notability bars are halved (a Lusitanian War with 22 editions is as
+# notable as a modern war with 40). Not for Japanese eras (only the famous five).
+OLD_ERA = 1500
+OLD_ERA_BARS = 0.5
+OLD_ERA_KEEP_BAR = {"Q24706"}
 ELECTION_MIN_SITELINKS = 40  # national elections too (they'd crowd every capital)
 WORK_MAX_SITELINKS = 60  # premieres and discoveries count at most this many
 THING_WEIGHT = 0.3  # found, premiered or launched things that aren't moments
@@ -197,7 +206,8 @@ MIN_ESTABLISHED_HAPPENING = 3.0  # institutions, firms etc. need ~7+ sitelinks
 # Standing places need this many sitelinks (one fewer with a photo).
 MIN_STANDING_SITELINKS = {"low": 6, "institution": 2, None: 2}
 IMAGE_BONUS = 1.15
-DROPPED_MIN_SITELINKS = 20  # build/dropped.csv lists left-out items this notable
+# build/dropped.csv lists left-out items this notable (GEOPEDIA_DROPPED_MIN=5 to see more)
+DROPPED_MIN_SITELINKS = int(os.environ.get("GEOPEDIA_DROPPED_MIN") or 20)
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -569,9 +579,24 @@ def main():
             it["img"] = commons_path(r["image"])
             it["desc"] = clean_desc(r["desc"])
 
+    # Organizations with no place of their own, at the place they were formed
+    # or their seat (the Dutch East India Company, the Knights Templar): they
+    # join the items and go through the same rules.
+    orgs = {}
+    for r in read("orgs", optional=True):
+        i = qid(r["item"])
+        pt, d = parse_point(r["place"].split("|", 1)[-1]), unpack_date(r["date"])
+        if not pt or not d or f"Q{i}" in DROP_ITEMS or NOT_EVENT_TITLE.search(r["title"]):
+            continue
+        new = i not in items  # (or one we have, with no place: the Knights Templar)
+        if new:
+            items[i] = {"title": r["title"], "sl": int(r["sl"] or 0), "img": commons_path(r["image"]), "desc": clean_desc(r["desc"])}
+        orgs[i] = (pt, d, r["classes"].split() if new else [])
+
     best_keep, best_excl, weak_excl = {}, {}, set()
     item_classes = defaultdict(list)
-    for r in read("classes"):
+    org_classes = ({"item": f"http://www.wikidata.org/entity/Q{i}", "cls": c} for i, (_, _, cs) in orgs.items() for c in cs)
+    for r in itertools.chain(read("classes"), org_classes):
         i = qid(r["item"])
         if i in items:
             item_classes[i].append(r["cls"].rsplit("/", 1)[1])
@@ -664,6 +689,8 @@ def main():
             pt = parse_point(r["c"])
             if pt:
                 coords[i] = pt
+    for i, (pt, _, _) in orgs.items():
+        coords.setdefault(i, pt)
 
     # Capitals with their years, so a country maps to its capital of the time.
     capitals = defaultdict(list)  # entity -> [(rank, point, from, to)]
@@ -798,13 +825,16 @@ def main():
                 d = parse_time(r["t"], r["prec"], r["cal"])
                 if d:
                     dates[i][prop].append((rk, d))
+    for i, (_, d, _) in orgs.items():
+        dates[i]["P571"].append((2, d))  # (as preferred: it's the statement the query chose)
 
     # Notable items left out, and why: build/dropped.csv answers "why isn't X on the map?".
     dropped = []
 
     def drop(i, it, role, reason):
         if it["sl"] >= DROPPED_MIN_SITELINKS:
-            dropped.append((it["sl"], f"Q{i}", it["title"], role or "", reason))
+            years = [d[0] for vals in dates.get(i, {}).values() for _, d in vals]
+            dropped.append((it["sl"], f"Q{i}", it["title"], role or "", reason, min(years) if years else ""))
 
     vital = load_vital() | {int(q[1:]) for q in KEEP_EVENTS}  # (hand-picked ones skip the bars too)
     print("classifying…")
@@ -884,7 +914,15 @@ def main():
                     continue
             # Some kinds of event only make the map when well known: murders,
             # ceremonies, conventions, local politics, exhibitions, contests.
+            first = start_d or found_d
+            old = first is not None and first[0] < OLD_ERA
+
+            def era_bar(n):
+                return math.ceil(n * OLD_ERA_BARS) if old else n
+
             bar = max(ROOT_MIN_SITELINKS.get(keep_root(i), 0), PERSONAL_MIN_SITELINKS if PERSONAL.match(it["title"]) else 0)
+            if old and keep_root(i) not in OLD_ERA_KEEP_BAR:
+                bar = era_bar(bar)
             if it["title"].startswith("Assassination") or i in vital:
                 bar = 0
             if sl < bar or SUB_EVENT.search(it["title"]):
@@ -925,13 +963,14 @@ def main():
                 # Known only by country: the capital, for events notable enough
                 # (elections would crowd every capital). Not for expeditions or
                 # meetings, which happened anywhere but there.
-                if notable and (sl >= NATIONWIDE_MIN_SITELINKS and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS) or i in vital) \
+                if notable and (sl >= era_bar(NATIONWIDE_MIN_SITELINKS) and (not elections.get(i) or sl >= ELECTION_MIN_SITELINKS) or i in vital) \
                         and cat not in ("science", "exploration") and keep_root(i) != "Q2761147":
                     stats["event:nationwide"] += 1
                 else:
                     pt, place = None, ""
             elif how:
-                if notable and (sl >= (WIDE_VOYAGE_MIN_SITELINKS if cat in ("science", "exploration") else WORLDWIDE_MIN_SITELINKS) or i in vital):
+                if notable and (sl >= era_bar(WIDE_VOYAGE_MIN_SITELINKS if cat in ("science", "exploration") else WORLDWIDE_MIN_SITELINKS)
+                                or i in vital):
                     # Spread over places far apart: no pin, listed while in view.
                     place, pt, worldwide = wide_label(*how), centroid(how[0]), True
                     stats["event:wide"] += 1
@@ -1010,6 +1049,15 @@ def main():
         stats[f"place:{role}"] += 1
 
     print("people, premieres, discoveries, launches, wrecks…")
+    def packed_rows(name, second):
+        """The made and written queries pack their place as "how|place|point|label":
+        how 1 where it was made or written, 2 where it was found or published
+        ("found at Fort Julien", "published in Rome")."""
+        for r in read(name, optional=True):
+            how, _, r["c"], label = (r["place"] or "|||").split("|", 3)
+            r["placeLabel"] = f"{second} {label}" if how == "2" and label else label
+            yield r
+
     found = set()
     for kind_name, kind, cat, weight in (
         ("births", BORN, "people", "born"),
@@ -1018,17 +1066,20 @@ def main():
         ("discoveries", DISCOVERED, "science", "discovery"),
         ("launches", LAUNCHED, "exploration", "launch"),
         ("wrecks", SANK, "disaster", "wreck"),
+        ("made", MADE, "culture", "made"),
+        ("written", WRITTEN, "culture", "written"),
     ):
-        for r in read(kind_name):
+        rows = {MADE: lambda: packed_rows("made", "found at"), WRITTEN: lambda: packed_rows("written", "published in")}
+        for r in (rows[kind]() if kind in rows else read(kind_name)):
             pt = parse_point(r["c"])
             d = unpack_date(r["date"])
-            if not pt or not d or r["title"].startswith("List of"):
+            if not pt or not d or r["title"].startswith("List of") or r["item"].rsplit("/", 1)[1] in DROP_ITEMS:
                 continue
             if r.get("cap"):
                 continue  # found/premiered somewhere as vague as a country
-            if kind in (PREMIERED, DISCOVERED):
+            if kind in (PREMIERED, DISCOVERED, MADE, WRITTEN):
                 # Sitelinks here measure the thing (oxygen, a symphony), not
-                # the moment it was found or first heard: cap them.
+                # the moment it was found, first heard or made: cap them.
                 r["sl"] = str(min(int(r["sl"] or 0), WORK_MAX_SITELINKS))
             if kind == LAUNCHED and int(r["sl"] or 0) < (ROUTINE_LAUNCH_MIN_SITELINKS if ROUTINE_CREWED.match(r["title"])
                                                           else LAUNCH_MIN_SITELINKS):
@@ -1036,8 +1087,8 @@ def main():
             if kind == SANK and int(r["sl"] or 0) < WRECK_MIN_SITELINKS:
                 continue
             s0, s1 = span(d)
-            if s1 - s0 > 100 or s0 > MAX_YEAR:
-                continue
+            if s1 - s0 > 100 or s0 > MAX_YEAR or s1 < MIN_YEAR:
+                continue  # (the Lion-man is older than the timeline)
             sl = int(r["sl"] or 0)
             img = commons_path(r["image"])
             # A fossil genus, an element, a moon or a film is a thing more than a
@@ -1047,7 +1098,7 @@ def main():
                 thing = ROUTINE_WEIGHT
             score = round(sl * WEIGHT[weight] * thing * (IMAGE_BONUS if img else 1), 1)
             i = qid(r["item"])
-            if kind in (PREMIERED, DISCOVERED, LAUNCHED, SANK) and not r.get("own"):
+            if kind in (PREMIERED, DISCOVERED, LAUNCHED, SANK, MADE, WRITTEN) and not r.get("own"):
                 found.add(i)  # (a site found where it stands stays a place too)
             happenings.append([i, r["title"], pt[0], pt[1], s0, s1, CAT[cat], kind,
                                score, img, clean_desc(r["desc"]), date_label(d), r.get("placeLabel") or ""])
@@ -1060,7 +1111,7 @@ def main():
     kinds_of = defaultdict(set)
     for h in happenings:
         kinds_of[h[0]].add(h[7])
-    happenings = [h for h in happenings if not (h[7] == DISCOVERED and EVENT in kinds_of[h[0]]
+    happenings = [h for h in happenings if not (h[7] in (DISCOVERED, WRITTEN) and EVENT in kinds_of[h[0]]
                                                 or h[7] == EVENT and LAUNCHED in kinds_of[h[0]])]
     # A ship whose sinking is already on the map as an event ("Sinking of RMS
     # Lusitania", the "Kursk submarine disaster"): the event only. (The Mary
@@ -1071,8 +1122,16 @@ def main():
             events_by_year[h[4]].append(h)
 
     def sunk_before(h):
+        """The event for this sinking, if there is one. It takes the ship's
+        notability and photo: the RMS Lusitania has 55 editions, the article
+        on its sinking 18."""
         name = re.sub(r"\s*\([^)]*\)$", "", h[1]).split()[-1]
-        return any(name in e[1] and km((h[2], h[3]), (e[2], e[3])) < 300 for e in events_by_year[h[4]])
+        for e in events_by_year[h[4]]:
+            if name in e[1] and km((h[2], h[3]), (e[2], e[3])) < 300:
+                e[8] = max(e[8], h[8])
+                e[9] = e[9] or h[9]
+                return True
+        return False
 
     sunk_twice = {h[0] for h in happenings if h[7] == SANK and sunk_before(h)}
     stats["wrecks_as_events"] = len(sunk_twice)
@@ -1089,19 +1148,20 @@ def main():
             print(f"  override {o['qid']} ({o['title']}): not fetched, run fetch_wikidata.py --force manual")
             continue
         start, end = override_date(o["start"]), override_date(o["end"]) if o["end"] else None
-        kind = {"premiered": PREMIERED, "discovered": DISCOVERED}.get(o["kind"], EVENT)
+        kind = {"premiered": PREMIERED, "discovered": DISCOVERED, "made": MADE, "written": WRITTEN}.get(o["kind"], EVENT)
         sl = int(m["sl"] or 0)
         if kind != EVENT:
             sl = min(sl, WORK_MAX_SITELINKS)
         img = commons_path(m["image"])
-        weight = {PREMIERED: "premiere", DISCOVERED: "discovery"}.get(kind, o["cat"])
+        weight = {PREMIERED: "premiere", DISCOVERED: "discovery", MADE: "made", WRITTEN: "written"}.get(kind, o["cat"])
         score = round(sl * WEIGHT[weight] * (IMAGE_BONUS if img else 1), 1)
         disp = "culture" if o["cat"] in ("culture", "sports") else o["cat"]
         label = range_label(start, end) if end else date_label(start)
         fixed.append([i, m["title"], float(o["lat"]), float(o["lng"]), span(start)[0], span(end or start)[1], CAT[disp],
                       kind, score, img, o["desc"] or clean_desc(m["desc"]), label, ""])
     ids = {r[0] for r in fixed}
-    happenings = [h for h in happenings if h[0] not in ids] + fixed
+    # (An explorer's voyage keeps their birth and death: John Cabot, 1497.)
+    happenings = [h for h in happenings if h[0] not in ids or h[7] in (BORN, DIED)] + fixed
     worldwide_recs = [h for h in worldwide_recs if h[0] not in ids]
     standing = [p for p in standing if p[0] not in ids]
     stats["overrides"] = len(fixed)
@@ -1135,7 +1195,7 @@ def main():
 
     with open(os.path.join(ROOT, "build", "dropped.csv"), "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["sitelinks", "item", "title", "role", "reason"])
+        w.writerow(["sitelinks", "item", "title", "role", "reason", "year"])
         w.writerows(sorted(dropped, reverse=True))
 
     for k, v in sorted(stats.items()):

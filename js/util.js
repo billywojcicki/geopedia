@@ -101,6 +101,9 @@ export function metaLine(r) {
   if (r.kind === KIND.BORN || r.kind === KIND.DIED) return `${s} in ${r.place}`;
   if (r.kind === KIND.PREMIERED || r.kind === KIND.DISCOVERED) return `${s} at ${r.place}`;
   if (r.kind === KIND.LAUNCHED) return `${s} from ${r.place}`;
+  if (r.kind === KIND.MADE || r.kind === KIND.WRITTEN) {
+    return /^(found at|published in) /.test(r.place) ? `${s}, ${r.place}` : `${s} in ${r.place}`;
+  }
   return `${s} · ${r.place}`;
 }
 
