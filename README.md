@@ -29,6 +29,7 @@ data/                     generated history data the site loads (committed)
 basemap/                  self-hosted world basemap, map style, label fonts, historical borders (generated)
 vendor/                   MapLibre GL, served from this site (fetched by the build)
 scripts/                  data pipeline (Python 3, stdlib only)
+promo/                    the trailer and its source (not used by the site)
 ```
 
 | File | What it does |

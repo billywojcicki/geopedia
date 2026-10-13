@@ -1,0 +1,479 @@
+{
+ "file": "music.wav / music.m4a",
+ "tempoBpm": 100,
+ "timeSignature": "4/4",
+ "beatSec": 0.6,
+ "barSec": 2.4,
+ "durationSec": 29.6,
+ "sampleRate": 48000,
+ "key": "D major",
+ "endHit": 26.4,
+ "sections": [
+  {
+   "name": "intro",
+   "start": 0.0,
+   "end": 2.4,
+   "bars": "1",
+   "desc": "soft shimmer: high string tremolo, celesta, choir oohs, low D pedal; swells into bar 2"
+  },
+  {
+   "name": "journey",
+   "start": 2.4,
+   "end": 19.2,
+   "bars": "2-8",
+   "desc": "pulse (cello/viola/bass ostinato, taiko, timpani) + horn melody; strong downbeat on every bar"
+  },
+  {
+   "name": "climax",
+   "start": 19.2,
+   "end": 26.4,
+   "bars": "9-11",
+   "desc": "full orchestra + choir, crash at 19.2, bVI-bVII cadence in bar 11 (24.0-26.4)"
+  },
+  {
+   "name": "endCard",
+   "start": 26.4,
+   "end": 29.6,
+   "bars": "12-13",
+   "desc": "endHit (timpani + bass drum + crash + full D major chord), chord rings out and fades"
+  }
+ ],
+ "markers": [
+  {
+   "name": "journeyStart",
+   "t": 2.4,
+   "note": "bar 2: pulse (ostinato, taiko, timpani) + horn melody enter"
+  },
+  {
+   "name": "journeyLayer2",
+   "t": 7.2,
+   "note": "bar 4: shaker and off-beat timpani join"
+  },
+  {
+   "name": "journeyBuild",
+   "t": 12.0,
+   "note": "bar 6: phrase 2 - violins, violas, choir aahs, snare, splash"
+  },
+  {
+   "name": "riser",
+   "t": 16.8,
+   "note": "bar 8: dominant build, timpani/snare/cymbal rolls, run into climax"
+  },
+  {
+   "name": "climaxHit",
+   "t": 19.2,
+   "note": "bar 9 downbeat: crash + full orchestra + choir"
+  },
+  {
+   "name": "finalCadence",
+   "t": 24.0,
+   "note": "bar 11: Bb -> C (bVI-bVII), drum fill from 25.8"
+  },
+  {
+   "name": "preHitGap",
+   "t": 26.16,
+   "note": "sustained parts release; only the drum/low-string fill plays"
+  },
+  {
+   "name": "endHit",
+   "t": 26.4,
+   "note": "bar 12 downbeat: the one big hit (timpani, bass drum, taiko, crash, full D major)"
+  },
+  {
+   "name": "fadeStart",
+   "t": 28.6,
+   "note": "final 1.0 s fade of the ringing chord"
+  },
+  {
+   "name": "musicEnd",
+   "t": 29.6
+  }
+ ],
+ "downbeatAccents": [
+  2.4,
+  4.8,
+  7.2,
+  9.6,
+  12.0,
+  14.4,
+  16.8,
+  19.2,
+  21.6,
+  24.0,
+  26.4
+ ],
+ "beatTimes": [
+  0.0,
+  0.6,
+  1.2,
+  1.8,
+  2.4,
+  3.0,
+  3.6,
+  4.2,
+  4.8,
+  5.4,
+  6.0,
+  6.6,
+  7.2,
+  7.8,
+  8.4,
+  9.0,
+  9.6,
+  10.2,
+  10.8,
+  11.4,
+  12.0,
+  12.6,
+  13.2,
+  13.8,
+  14.4,
+  15.0,
+  15.6,
+  16.2,
+  16.8,
+  17.4,
+  18.0,
+  18.6,
+  19.2,
+  19.8,
+  20.4,
+  21.0,
+  21.6,
+  22.2,
+  22.8,
+  23.4,
+  24.0,
+  24.6,
+  25.2,
+  25.8,
+  26.4,
+  27.0,
+  27.6,
+  28.2,
+  28.8,
+  29.4
+ ],
+ "barTimes": [
+  0.0,
+  2.4,
+  4.8,
+  7.2,
+  9.6,
+  12.0,
+  14.4,
+  16.8,
+  19.2,
+  21.6,
+  24.0,
+  26.4,
+  28.8
+ ],
+ "bars": [
+  {
+   "bar": 1,
+   "t": 0.0
+  },
+  {
+   "bar": 2,
+   "t": 2.4
+  },
+  {
+   "bar": 3,
+   "t": 4.8
+  },
+  {
+   "bar": 4,
+   "t": 7.2
+  },
+  {
+   "bar": 5,
+   "t": 9.6
+  },
+  {
+   "bar": 6,
+   "t": 12.0
+  },
+  {
+   "bar": 7,
+   "t": 14.4
+  },
+  {
+   "bar": 8,
+   "t": 16.8
+  },
+  {
+   "bar": 9,
+   "t": 19.2
+  },
+  {
+   "bar": 10,
+   "t": 21.6
+  },
+  {
+   "bar": 11,
+   "t": 24.0
+  },
+  {
+   "bar": 12,
+   "t": 26.4
+  },
+  {
+   "bar": 13,
+   "t": 28.8
+  }
+ ],
+ "beats": [
+  {
+   "t": 0.0,
+   "bar": 1,
+   "beat": 1
+  },
+  {
+   "t": 0.6,
+   "bar": 1,
+   "beat": 2
+  },
+  {
+   "t": 1.2,
+   "bar": 1,
+   "beat": 3
+  },
+  {
+   "t": 1.8,
+   "bar": 1,
+   "beat": 4
+  },
+  {
+   "t": 2.4,
+   "bar": 2,
+   "beat": 1
+  },
+  {
+   "t": 3.0,
+   "bar": 2,
+   "beat": 2
+  },
+  {
+   "t": 3.6,
+   "bar": 2,
+   "beat": 3
+  },
+  {
+   "t": 4.2,
+   "bar": 2,
+   "beat": 4
+  },
+  {
+   "t": 4.8,
+   "bar": 3,
+   "beat": 1
+  },
+  {
+   "t": 5.4,
+   "bar": 3,
+   "beat": 2
+  },
+  {
+   "t": 6.0,
+   "bar": 3,
+   "beat": 3
+  },
+  {
+   "t": 6.6,
+   "bar": 3,
+   "beat": 4
+  },
+  {
+   "t": 7.2,
+   "bar": 4,
+   "beat": 1
+  },
+  {
+   "t": 7.8,
+   "bar": 4,
+   "beat": 2
+  },
+  {
+   "t": 8.4,
+   "bar": 4,
+   "beat": 3
+  },
+  {
+   "t": 9.0,
+   "bar": 4,
+   "beat": 4
+  },
+  {
+   "t": 9.6,
+   "bar": 5,
+   "beat": 1
+  },
+  {
+   "t": 10.2,
+   "bar": 5,
+   "beat": 2
+  },
+  {
+   "t": 10.8,
+   "bar": 5,
+   "beat": 3
+  },
+  {
+   "t": 11.4,
+   "bar": 5,
+   "beat": 4
+  },
+  {
+   "t": 12.0,
+   "bar": 6,
+   "beat": 1
+  },
+  {
+   "t": 12.6,
+   "bar": 6,
+   "beat": 2
+  },
+  {
+   "t": 13.2,
+   "bar": 6,
+   "beat": 3
+  },
+  {
+   "t": 13.8,
+   "bar": 6,
+   "beat": 4
+  },
+  {
+   "t": 14.4,
+   "bar": 7,
+   "beat": 1
+  },
+  {
+   "t": 15.0,
+   "bar": 7,
+   "beat": 2
+  },
+  {
+   "t": 15.6,
+   "bar": 7,
+   "beat": 3
+  },
+  {
+   "t": 16.2,
+   "bar": 7,
+   "beat": 4
+  },
+  {
+   "t": 16.8,
+   "bar": 8,
+   "beat": 1
+  },
+  {
+   "t": 17.4,
+   "bar": 8,
+   "beat": 2
+  },
+  {
+   "t": 18.0,
+   "bar": 8,
+   "beat": 3
+  },
+  {
+   "t": 18.6,
+   "bar": 8,
+   "beat": 4
+  },
+  {
+   "t": 19.2,
+   "bar": 9,
+   "beat": 1
+  },
+  {
+   "t": 19.8,
+   "bar": 9,
+   "beat": 2
+  },
+  {
+   "t": 20.4,
+   "bar": 9,
+   "beat": 3
+  },
+  {
+   "t": 21.0,
+   "bar": 9,
+   "beat": 4
+  },
+  {
+   "t": 21.6,
+   "bar": 10,
+   "beat": 1
+  },
+  {
+   "t": 22.2,
+   "bar": 10,
+   "beat": 2
+  },
+  {
+   "t": 22.8,
+   "bar": 10,
+   "beat": 3
+  },
+  {
+   "t": 23.4,
+   "bar": 10,
+   "beat": 4
+  },
+  {
+   "t": 24.0,
+   "bar": 11,
+   "beat": 1
+  },
+  {
+   "t": 24.6,
+   "bar": 11,
+   "beat": 2
+  },
+  {
+   "t": 25.2,
+   "bar": 11,
+   "beat": 3
+  },
+  {
+   "t": 25.8,
+   "bar": 11,
+   "beat": 4
+  },
+  {
+   "t": 26.4,
+   "bar": 12,
+   "beat": 1
+  },
+  {
+   "t": 27.0,
+   "bar": 12,
+   "beat": 2
+  },
+  {
+   "t": 27.6,
+   "bar": 12,
+   "beat": 3
+  },
+  {
+   "t": 28.2,
+   "bar": 12,
+   "beat": 4
+  },
+  {
+   "t": 28.8,
+   "bar": 13,
+   "beat": 1
+  },
+  {
+   "t": 29.4,
+   "bar": 13,
+   "beat": 2
+  }
+ ],
+ "notes": "All times in seconds from the first sample of music.wav. Fixed tempo: beat n is at n*0.6 s. Every downbeat from 2.4 s to 24.0 s carries a timpani/taiko/ostinato accent; 19.2 s (crash) and 26.4 s (endHit) are the two biggest hits. Bar 13 (28.8 s) is only the ring-out tail."
+}

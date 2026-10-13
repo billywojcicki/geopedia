@@ -1,0 +1,340 @@
+{
+  "url": "http://127.0.0.1:8766/",
+  "fps": 30,
+  "duration": 29.6,
+  "theme": "light",
+  "css": "#tr .title { top: 50%; margin-top: -60px; font: 600 84px/1.1 Cinzel, serif; letter-spacing: .06em; } #tr .sub { top: 50%; margin-top: 50px; font: italic 400 40px/1.2 Garamond, serif; letter-spacing: .02em; color: rgba(255,255,255,.88); } #tr .logo { top: 50%; margin-top: -92px; font: 500 128px/1 Garamond, serif; font-variant: small-caps; letter-spacing: .04em; } #tr .tag { top: 50%; margin-top: 52px; font: italic 400 46px/1.2 Garamond, serif; color: rgba(255,255,255,.85); } #tr .url { top: 50%; margin-top: 128px; font: 500 30px/1.2 Inter, sans-serif; letter-spacing: .08em; color: rgba(255,255,255,.7); } #tr .dim { position: absolute; inset: 0; background: #000; } #tr .side { left: 52%; right: 6%; text-align: left; } #tr .sidetitle { top: 50%; margin-top: -110px; font: 600 92px/1.05 Cinzel, serif; letter-spacing: .05em; } #tr .sidesub { top: 50%; margin-top: 10px; font: italic 400 42px/1.25 Garamond, serif; color: rgba(255,255,255,.9); } #tr .low { top: 74%; } #tr .dimblur { position: absolute; inset: 0; background: rgba(4,6,14,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }",
+  "shots": [
+    {
+      "t0": 0.0,
+      "t1": 2.4,
+      "ease": "out",
+      "span": "auto",
+      "chrome": "clean",
+      "from": {
+        "center": [
+          -75,
+          22
+        ],
+        "zoom": 0.55,
+        "year": 1500
+      },
+      "to": {
+        "center": [
+          -35,
+          28
+        ],
+        "zoom": 1.35
+      }
+    },
+    {
+      "t0": 2.4,
+      "t1": 4.8,
+      "ease": "out",
+      "bigYear": true,
+      "from": {
+        "center": [
+          31.6,
+          29.6
+        ],
+        "zoom": 5.2,
+        "bearing": -6,
+        "year": -2559
+      },
+      "to": {
+        "center": [
+          31.3,
+          29.9
+        ],
+        "zoom": 5.7,
+        "bearing": 0
+      }
+    },
+    {
+      "t0": 4.8,
+      "t1": 7.2,
+      "ease": "out",
+      "bigYear": true,
+      "from": {
+        "center": [
+          12.0,
+          41.7
+        ],
+        "zoom": 5.3,
+        "year": -43
+      },
+      "to": {
+        "center": [
+          12.45,
+          41.9
+        ],
+        "zoom": 5.8,
+        "bearing": 5
+      }
+    },
+    {
+      "t0": 7.2,
+      "t1": 9.6,
+      "ease": "out",
+      "bigYear": true,
+      "from": {
+        "center": [
+          104,
+          44
+        ],
+        "zoom": 2.9,
+        "year": 1240
+      },
+      "to": {
+        "center": [
+          84,
+          46
+        ],
+        "zoom": 3.3
+      }
+    },
+    {
+      "t0": 9.6,
+      "t1": 12.0,
+      "ease": "out",
+      "bigYear": true,
+      "from": {
+        "center": [
+          27.8,
+          40.3
+        ],
+        "zoom": 5.2,
+        "year": 1453
+      },
+      "to": {
+        "center": [
+          28.8,
+          41.0
+        ],
+        "zoom": 5.8,
+        "bearing": -5
+      }
+    },
+    {
+      "t0": 12.0,
+      "t1": 14.4,
+      "ease": "out",
+      "chrome": "full",
+      "from": {
+        "center": [
+          1.0,
+          48.0
+        ],
+        "zoom": 5.0,
+        "year": 1789
+      },
+      "to": {
+        "center": [
+          2.0,
+          48.6
+        ],
+        "zoom": 5.6
+      }
+    },
+    {
+      "t0": 14.4,
+      "t1": 16.8,
+      "ease": "linear",
+      "yearEase": "linear",
+      "chrome": "timeline",
+      "from": {
+        "center": [
+          14,
+          49
+        ],
+        "zoom": 3.55,
+        "year": 1910
+      },
+      "to": {
+        "center": [
+          17,
+          49.5
+        ],
+        "zoom": 3.75,
+        "year": 1946
+      }
+    },
+    {
+      "t0": 16.8,
+      "t1": 18.0,
+      "ease": "out",
+      "bigYear": true,
+      "from": {
+        "center": [
+          -1.5,
+          49.6
+        ],
+        "zoom": 5.0,
+        "year": 1944
+      },
+      "to": {
+        "center": [
+          -0.8,
+          49.4
+        ],
+        "zoom": 5.6
+      }
+    },
+    {
+      "t0": 18.0,
+      "t1": 19.2,
+      "ease": "out",
+      "bigYear": true,
+      "from": {
+        "center": [
+          -81.5,
+          28.0
+        ],
+        "zoom": 5.0,
+        "year": 1969
+      },
+      "to": {
+        "center": [
+          -80.9,
+          28.4
+        ],
+        "zoom": 5.7
+      }
+    },
+    {
+      "t0": 19.2,
+      "t1": 21.6,
+      "ease": "inOut",
+      "bigYear": true,
+      "from": {
+        "center": [
+          13.38,
+          52.51
+        ],
+        "zoom": 5.8,
+        "year": 1989
+      },
+      "to": {
+        "center": [
+          20,
+          42
+        ],
+        "zoom": 1.9
+      }
+    },
+    {
+      "t0": 21.6,
+      "t1": 26.4,
+      "ease": "linear",
+      "span": 1000,
+      "from": {
+        "center": [
+          10,
+          38
+        ],
+        "zoom": 1.5,
+        "year": 900
+      },
+      "to": {
+        "center": [
+          45,
+          30
+        ],
+        "zoom": 1.62
+      },
+      "padding": {
+        "right": 860
+      }
+    },
+    {
+      "t0": 26.4,
+      "t1": 29.6,
+      "ease": "out",
+      "span": 1000,
+      "from": {
+        "center": [
+          45,
+          30
+        ],
+        "zoom": 1.62,
+        "year": 900
+      },
+      "to": {
+        "center": [
+          62,
+          28
+        ],
+        "zoom": 1.55
+      }
+    }
+  ],
+  "texts": [
+    {
+      "id": "fadein",
+      "cls": "dim",
+      "html": "",
+      "t0": -5,
+      "t1": 2.3,
+      "fade": 2.0,
+      "maxOpacity": 0.8
+    },
+    {
+      "id": "intro",
+      "cls": "title low",
+      "html": "All of history",
+      "t0": 0.25,
+      "t1": 2.35,
+      "fade": 0.45
+    },
+    {
+      "id": "years",
+      "cls": "side sidetitle",
+      "html": "5,000 years",
+      "t0": 21.8,
+      "t1": 26.2,
+      "fade": 0.35
+    },
+    {
+      "id": "moments",
+      "cls": "side sidesub",
+      "html": "200,000 moments,<br>every one a Wikipedia article",
+      "t0": 22.4,
+      "t1": 26.2,
+      "fade": 0.35
+    },
+    {
+      "id": "onemap",
+      "cls": "side sidesub",
+      "html": "<b style=\"font-style:normal;font-family:Cinzel;font-weight:600;letter-spacing:.05em\">One map.</b>",
+      "style": "margin-top: 130px",
+      "t0": 24.0,
+      "t1": 26.2,
+      "fade": 0.3
+    },
+    {
+      "id": "dim",
+      "cls": "dimblur",
+      "html": "",
+      "t0": 26.4,
+      "t1": 40,
+      "fade": 0.9,
+      "maxOpacity": 1
+    },
+    {
+      "id": "logo",
+      "cls": "logo",
+      "html": "Geopedia",
+      "t0": 26.45,
+      "t1": 40,
+      "fade": 0.6
+    },
+    {
+      "id": "tag",
+      "cls": "tag",
+      "html": "The free atlas of history",
+      "t0": 26.9,
+      "t1": 40,
+      "fade": 0.6
+    }
+  ]
+}
