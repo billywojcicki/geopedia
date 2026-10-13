@@ -14,6 +14,8 @@
 | 27 to 28 s | The world collapses into a point. |
 | 28 to 30 s | The logo. |
 
+The finished video is `../geopedia-trailer-v2.mp4` (43 MB).
+
 ## Files
 
 - `cut.json` is the edit: timings, camera keyframes, the year curve, callouts and copy.
@@ -21,7 +23,7 @@
 - `overlay.js` and `overlay.css` draw everything over the map: the comets, the sun, the impact, the year counter, the timeline strip, callouts, copy, the implosion and the end card.
 - `capture.mjs` drives the real site in headless Chromium and saves one JPEG per frame (quality 95).
 - `supervise.mjs` renders the missing frames in chunks, a few browsers at a time, and restarts any chunk that stalls. Missing frames can be sparse: the frames of a 15 fps draft are the even frames at 30 fps, so a draft is never wasted.
-- `encode.sh` muxes the frames and `music/music.wav` into the MP4, with a soft glow and grain.
+- `encode.sh` muxes the frames and `music/music.wav` into the MP4 (about 43 MB), with a soft glow.
 - `music-src/` builds the score (see below).
 
 ## Rendering
