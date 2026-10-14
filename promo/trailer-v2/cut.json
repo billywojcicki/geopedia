@@ -39,20 +39,25 @@
   "end": { "t": 28 },
 
   "callouts": [
-    { "t": 8.5,  "side": "left",  "title": "Great Pyramid of Giza", "date": "2560 BC", "at": [31.1342, 29.9792], "cat": "built", "img": "e/e3/Kheops-Pyramid.jpg" },
-    { "t": 9.0,  "side": "right", "title": "Code of Hammurabi", "date": "1754 BC", "at": [44.4209, 32.5363], "cat": "politics", "img": "9/94/P1050763_Louvre_code_Hammurabi_face_rwk-gradient.jpg" },
-    { "t": 10.5, "side": "right", "title": "Battle of Marathon", "date": "490 BC", "at": [23.9783, 38.1181], "cat": "conflict", "img": "9/99/Scene_of_the_Battle_of_Marathon.jpg" },
-    { "t": 11.25, "side": "left", "title": "Assassination of Julius Caesar", "date": "44 BC", "at": [12.4769, 41.8953], "cat": "politics", "img": "0/0a/Vincenzo_Camuccini,_The_Death_of_Julius_Caesar_(detail).jpg" },
-    { "t": 12.5, "side": "right", "title": "Hagia Sophia", "date": "AD 537", "at": [28.98, 41.0083], "cat": "built", "img": "2/22/Hagia_Sophia_Mars_2013.jpg" },
-    { "t": 15.5, "side": "right", "title": "Forbidden City", "date": "1420", "at": [116.3908, 39.9158], "cat": "built", "img": "2/23/Hall_of_Supreme_Harmony_(20241127120000).jpg" },
-    { "t": 18.5, "side": "right", "title": "Declaration of Independence", "date": "1776", "at": [-75.15, 39.9489], "cat": "politics", "img": "8/8f/United_States_Declaration_of_Independence.jpg" },
-    { "t": 20.5, "side": "left",  "title": "Sinking of the Titanic", "date": "1912", "at": [-49.9458, 41.7319], "cat": "disaster", "img": "f/fd/RMS_Titanic_3.jpg" },
-    { "t": 21.25, "side": "right", "title": "D-Day", "date": "1944", "at": [-0.6, 49.34], "cat": "conflict", "img": "a/a5/Into_the_Jaws_of_Death_23-0455M_edit.jpg" },
-    { "t": 22.5, "side": "right", "title": "Fall of the Berlin Wall", "date": "1989", "at": [13.4044, 52.5186], "cat": "politics", "img": "2/25/BerlinWall-BrandenburgGate.jpg" }
+    {"t": 8.5, "side": "left", "title": "Great Pyramid of Giza", "date": "2560 BC", "at": [31.1342, 29.9792], "cat": "built", "img": "e/e3/Kheops-Pyramid.jpg"},
+    {"t": 9.0, "side": "right", "title": "Code of Hammurabi", "date": "1754 BC", "at": [44.4209, 32.5363], "cat": "politics", "img": "9/94/P1050763_Louvre_code_Hammurabi_face_rwk-gradient.jpg"},
+    {"t": 9.5, "side": "left", "title": "Mask of Tutankhamun", "date": "1323 BC", "at": [32.6014, 25.7402], "cat": "culture", "img": "f/fb/Wikimedia_2016_-21_(cropped).jpg", "focus": "center 22%"},
+    {"t": 10.5, "side": "right", "title": "Battle of Marathon", "date": "490 BC", "at": [23.9783, 38.1181], "cat": "conflict", "img": "9/99/Scene_of_the_Battle_of_Marathon.jpg"},
+    {"t": 11.25, "side": "left", "title": "Assassination of Julius Caesar", "date": "44 BC", "at": [12.4769, 41.8953], "cat": "politics", "img": "0/0a/Vincenzo_Camuccini,_The_Death_of_Julius_Caesar_(detail).jpg"},
+    {"t": 12.5, "side": "right", "title": "Hagia Sophia", "date": "AD 537", "at": [28.98, 41.0083], "cat": "built", "img": "2/22/Hagia_Sophia_Mars_2013.jpg"},
+    {"t": 14.5, "side": "right", "title": "Genghis Khan", "date": "Born 1162", "at": [111.6247, 49.0218], "cat": "people", "img": "3/35/YuanEmperorAlbumGenghisPortrait.jpg", "focus": "center 30%"},
+    {"t": 15.5, "side": "right", "title": "Forbidden City", "date": "1420", "at": [116.3908, 39.9158], "cat": "built", "img": "2/23/Hall_of_Supreme_Harmony_(20241127120000).jpg"},
+    {"t": 16.75, "side": "left", "title": "Battle of Sekigahara", "date": "1600", "at": [136.4616, 35.3705], "cat": "conflict", "img": "9/9f/Sekigaharascreen.jpg"},
+    {"t": 18.5, "side": "right", "title": "Declaration of Independence", "date": "1776", "at": [-75.15, 39.9489], "cat": "politics", "img": "8/8f/United_States_Declaration_of_Independence.jpg"},
+    {"t": 20.0, "side": "left", "title": "Statue of Liberty", "date": "1886", "at": [-74.0444, 40.6892], "cat": "built", "img": "9/93/Statue_of_Liberty_and_a_sightseeing_boat,_Liberty_Island,_New_York.jpg"},
+    {"t": 20.5, "side": "right", "title": "Sinking of the Titanic", "date": "1912", "at": [-49.9458, 41.7319], "cat": "disaster", "img": "f/fd/RMS_Titanic_3.jpg"},
+    {"t": 21.25, "side": "right", "title": "D-Day", "date": "1944", "at": [-0.6, 49.34], "cat": "conflict", "img": "a/a5/Into_the_Jaws_of_Death_23-0455M_edit.jpg"},
+    {"t": 22.5, "side": "right", "title": "Fall of the Berlin Wall", "date": "1989", "at": [13.4044, 52.5186], "cat": "politics", "img": "2/25/BerlinWall-BrandenburgGate.jpg"},
+    {"t": 23.5, "side": "left", "title": "Notre-Dame fire", "date": "2019", "at": [2.3498, 48.853], "cat": "disaster", "img": "3/39/Incendie_Notre_Dame_de_Paris.jpg", "focus": "center 35%"}
   ],
 
   "texts": [
-    { "id": "bc", "cls": "dawn-year", "html": "3000 BC", "t0": 5.0, "t1": 7.7, "fade": 0.6 },
+    { "id": "bc", "cls": "dawn-year", "html": "3000<small>BC</small>", "t0": 5.0, "t1": 7.7, "fade": 0.6 },
     { "id": "years", "cls": "pay pay1", "html": "5,000 years.", "t0": 24.25, "t1": 26.95, "fade": 0.25 },
     { "id": "onemap", "cls": "pay pay3", "html": "One map.", "t0": 25.3, "t1": 26.95, "fade": 0.25 },
     { "id": "logo", "cls": "logo", "html": "Geopedia", "t0": 28.0, "t1": 99, "fade": 0.35 },

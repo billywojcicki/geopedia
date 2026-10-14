@@ -77,7 +77,7 @@ window.TR = (() => {
       const node = el('div', `co ${co.side}`);
       node.style.setProperty('--c', color);
       node.innerHTML = `<div class="co-ring"></div><div class="co-dot"></div><div class="co-line"></div>
-        <div class="co-card"><div class="co-img" style="background-image:url('${images[i]}')"></div>
+        <div class="co-card"><div class="co-img" style="background-image:url('${images[i]}');background-position:${co.focus ?? 'center'}"></div>
         <div class="co-text"><div class="co-d">${co.date}</div><div class="co-t">${co.title}</div></div></div>`;
       tr.append(node);
       callouts.push({ ...co, node, color, ring: node.querySelector('.co-ring'), dot: node.querySelector('.co-dot'),

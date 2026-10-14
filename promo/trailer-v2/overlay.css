@@ -12,10 +12,10 @@ body.tr-nopins .maplibregl-marker { opacity: 0 !important; transition: opacity .
   background: linear-gradient(to top, rgba(6,9,18,.62) 0%, rgba(6,9,18,.38) 40%, rgba(6,9,18,0) 100%); }
 #tr .counter {
   position: absolute; left: 92px; bottom: 116px; color: #fff; transform-origin: left bottom;
-  font: 200 150px/1 "Inter Display", Inter, sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em;
+  font: 800 158px/1 "EB Garamond", serif; font-variant-numeric: lining-nums tabular-nums; letter-spacing: .005em;
   text-shadow: 0 4px 40px rgba(0,0,0,.75);
 }
-#tr .counter small { font-size: .36em; font-weight: 400; letter-spacing: .14em; margin: 0 .35em; opacity: .85; }
+#tr .counter small, #tr .dawn-year small { font-size: .4em; font-weight: 700; letter-spacing: .1em; margin: 0 .35em; opacity: .9; }
 
 /* Callouts: a ring and dot on the spot, a leader line, a card with the photo. */
 #tr .co { position: absolute; left: 0; top: 0; }
@@ -36,10 +36,10 @@ body.tr-nopins .maplibregl-marker { opacity: 0 !important; transition: opacity .
 /* Copy. */
 #tr .t { position: absolute; left: 0; right: 0; text-align: center; color: #fff; opacity: 0;
   text-shadow: 0 4px 34px rgba(0,0,0,.65); font-family: "Inter Display", Inter, sans-serif; }
-#tr .dawn-year { top: 19%; font-weight: 200; font-size: 112px; line-height: 1; letter-spacing: .42em; padding-left: .42em; }
-#tr .pay { left: 55%; right: 3%; text-align: left; line-height: 1; }
-#tr .pay1 { top: 36%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; }
-#tr .pay3 { top: 50%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; }
-#tr .logo { top: 388px; font-weight: 700; font-size: 176px; line-height: 1; --track: -.02em; --k: 1;
+#tr .dawn-year { top: 18%; font: 800 128px/1 "EB Garamond", serif; font-variant-numeric: lining-nums; letter-spacing: .04em; }
+#tr .pay { left: 55%; right: 3%; text-align: left; line-height: 1; font-family: Cinzel, serif; }
+#tr .pay1 { top: 37%; font-weight: 700; font-size: 100px; letter-spacing: .02em; }
+#tr .pay3 { top: 50%; font-weight: 700; font-size: 100px; letter-spacing: .02em; }
+#tr .logo { top: 372px; font: 600 176px/1 "EB Garamond", serif; font-variant: small-caps; --track: .05em; --k: 1;
   letter-spacing: calc(var(--track) + (1 - var(--k)) * .3em); padding-left: calc(var(--track) + (1 - var(--k)) * .3em); }
-#tr .tag { top: 606px; font-weight: 300; font-size: 48px; line-height: 1.2; letter-spacing: .05em; color: rgba(255,255,255,.88); }
+#tr .tag { top: 590px; font: italic 400 54px/1.2 "EB Garamond", serif; letter-spacing: .01em; color: rgba(255,255,255,.9); }
