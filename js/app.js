@@ -10,7 +10,7 @@ import { buildStyle, applyAge, ageFor, themeName, addGlyphProtocol } from './bas
 import { Timeline } from './timeline.js';
 import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
-import { Borders } from './borders.js';
+import { Borders, prefetchBorders } from './borders.js';
 import { applyOldNames, loadOldNames } from './oldnames.js';
 import { Space } from './space.js';
 import { Sheet } from './sheet.js';
@@ -66,6 +66,7 @@ async function init() {
   bindChrome();
   setYear(state.year);
   update(); // request the first view's data now, not after the map constructor's long task
+  if (bordersOn()) prefetchBorders(state.year); // behind the data, while MapLibre downloads
 
   await libReady;
   addGlyphProtocol();
@@ -117,8 +118,6 @@ async function init() {
   map.once('idle', () => {
     store.prefetchWorld();
     registerServiceWorker();
-    bordersReady = true;
-    syncBorders();
   });
 }
 
@@ -130,6 +129,11 @@ function onStyleLoad() {
   pins.attach();
   updateDots();
   applyAge(map, theme, lastAge = ageFor(state.year));
+  if (!bordersReady) {
+    // After the first frame, which asks for the first view's tiles: the
+    // borders queue up right behind them in the map's worker.
+    map.once('render', () => { bordersReady = true; syncBorders(); });
+  }
   borders.restore();
   loadOldNames().then(() => { if (styleReady) applyOldNames(map, state.year); });
 }
@@ -166,12 +170,13 @@ let styleReady = false;
 
 // Historical borders are on by default before 1992, when today's borders and
 // names mislead (no Russia in 1960: the Soviet Union); the Layers toggle
-// overrides that for the session. They wait for the map's first idle so they
-// never slow down the first view.
+// overrides that for the session. They are part of the first view: their
+// files download during startup and they go on the map with its first frame.
 const AUTO_BORDERS_BEFORE = 1992;
 let bordersReady = false;
+const bordersOn = () => state.borders ?? state.year < AUTO_BORDERS_BEFORE;
 function syncBorders(dragging = false) {
-  const on = state.borders ?? state.year < AUTO_BORDERS_BEFORE;
+  const on = bordersOn();
   $('#opt-borders').checked = on;
   if (!bordersReady) return;
   if (on !== borders.on) borders.toggle(on, state.year);
