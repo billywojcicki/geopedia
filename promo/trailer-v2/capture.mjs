@@ -34,7 +34,7 @@ const browser = await chromium.launch({
   args: [...(process.env.SOFTWARE_GL === '0' ? [] : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']), '--hide-scrollbars'],
   proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } : undefined,
 });
-const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: SCALE, colorScheme: 'dark' });
+const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: SCALE, colorScheme: cfg.theme ?? 'light' });
 const page = await ctx.newPage();
 page.on('pageerror', e => console.log('pageerror', e.message));
 if (DEBUG) page.on('console', m => console.log('console', m.text()));
@@ -43,7 +43,19 @@ const s0 = stateAt(cfg, from / FPS);
 await page.goto(`${process.env.TRAILER_URL ?? cfg.url}#y=${s0.year}&w=${s0.span}&m=${s0.cam.center[0]},${s0.cam.center[1]},${Math.max(0, s0.cam.zoom)}`);
 await page.waitForFunction(() => window.geopedia?.map?.loaded(), null, { timeout: 60000 });
 await page.waitForTimeout(5000);
+// Fonts from fonts/ (or FONTS), embedded: "PlayfairDisplay-Italic[wght].ttf" is Playfair Display, italic.
+const fontDir = process.env.FONTS || path.join(here, 'fonts');
+const faces = (fs.existsSync(fontDir) ? fs.readdirSync(fontDir) : []).filter(f => f.endsWith('.ttf')).map(f => {
+  const family = f.replace(/(-Italic)?\[.*$/, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^EBGaramond/, 'EB Garamond');
+  const style = f.includes('-Italic') ? 'italic' : 'normal';
+  const data = fs.readFileSync(path.join(fontDir, f)).toString('base64');
+  return `@font-face { font-family: "${family}"; font-style: ${style}; font-weight: 100 900; src: url(data:font/ttf;base64,${data}); }`;
+}).join('\n');
+await page.addStyleTag({ content: faces });
 await page.addStyleTag({ content: fs.readFileSync(path.join(here, 'overlay.css'), 'utf8') });
+// MOCK_CSS: extra styles on top (for trying looks).
+if (process.env.MOCK_CSS) await page.addStyleTag({ content: fs.readFileSync(process.env.MOCK_CSS, 'utf8') });
+await page.evaluate(() => document.fonts.ready);
 await page.addScriptTag({ content: fs.readFileSync(path.join(here, 'overlay.js'), 'utf8') });
 await page.evaluate(({ cfg, images, hist }) => {
   const m = window.geopedia.map;

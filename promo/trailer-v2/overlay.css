@@ -7,6 +7,9 @@ body.tr-nopins .maplibregl-marker { opacity: 0 !important; transition: opacity .
 #tr .vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 56%, rgba(0,0,0,.55) 100%); }
 #tr .flash { position: absolute; inset: 0; opacity: 0; background: radial-gradient(circle at 50% 50%, #fff 0%, #fff7ea 45%, #ffd6a0 100%); }
 
+/* A dark wash along the bottom keeps the counter and timeline readable over a light map. */
+#tr .scrim { position: absolute; left: 0; right: 0; bottom: 0; height: 42%; opacity: 0;
+  background: linear-gradient(to top, rgba(6,9,18,.62) 0%, rgba(6,9,18,.38) 40%, rgba(6,9,18,0) 100%); }
 #tr .counter {
   position: absolute; left: 92px; bottom: 116px; color: #fff; transform-origin: left bottom;
   font: 200 150px/1 "Inter Display", Inter, sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em;
@@ -35,10 +38,8 @@ body.tr-nopins .maplibregl-marker { opacity: 0 !important; transition: opacity .
   text-shadow: 0 4px 34px rgba(0,0,0,.65); font-family: "Inter Display", Inter, sans-serif; }
 #tr .dawn-year { top: 19%; font-weight: 200; font-size: 112px; line-height: 1; letter-spacing: .42em; padding-left: .42em; }
 #tr .pay { left: 55%; right: 3%; text-align: left; line-height: 1; }
-#tr .pay1 { top: 29%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; }
-#tr .pay2 { top: 44%; font-weight: 300; font-size: 72px; letter-spacing: -.01em; }
-#tr .pay3 { top: 55.5%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; text-shadow: none;
-  background: linear-gradient(90deg, #ffd27a, #ff5fa2 55%, #8f7bff); -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 4px 24px rgba(0,0,0,.6)); }
-#tr .logo { top: 388px; font-weight: 700; font-size: 176px; line-height: 1; letter-spacing: -.02em; }
+#tr .pay1 { top: 36%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; }
+#tr .pay3 { top: 50%; font-weight: 800; font-size: 112px; letter-spacing: -.025em; }
+#tr .logo { top: 388px; font-weight: 700; font-size: 176px; line-height: 1; --track: -.02em; --k: 1;
+  letter-spacing: calc(var(--track) + (1 - var(--k)) * .3em); padding-left: calc(var(--track) + (1 - var(--k)) * .3em); }
 #tr .tag { top: 606px; font-weight: 300; font-size: 48px; line-height: 1.2; letter-spacing: .05em; color: rgba(255,255,255,.88); }

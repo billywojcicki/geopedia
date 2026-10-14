@@ -6,7 +6,7 @@
 // rendered on its own and chunks rendered by different browsers match.
 window.TR = (() => {
   const W = 1920, H = 1080;
-  let cfg, map, dpr, front, fx, back, bx, flash, counter, callouts = [], texts = new Map();
+  let cfg, map, dpr, front, fx, back, bx, flash, scrim, counter, callouts = [], texts = new Map();
 
   // ---- helpers -------------------------------------------------------------
   const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -63,6 +63,7 @@ window.TR = (() => {
     front = canvas('tr-front'); fx = front.getContext('2d');
     tr.append(front, el('div', 'vignette'));
     flash = el('div', 'flash'); tr.append(flash);
+    scrim = el('div', 'scrim'); tr.append(scrim);
     counter = el('div', 'counter'); tr.append(counter);
     const tick = el('div'); tick.id = 'tr-tick'; tick.style.cssText = 'position:absolute;left:0;top:0;width:2px;height:2px;opacity:.01;background:#000'; tr.append(tick);
 
@@ -319,6 +320,7 @@ window.TR = (() => {
     const r = cfg.rush;
     const a = smooth(r.t0 + 0.1, r.t0 + 0.4, t) * (1 - smooth(r.t1 + 0.35, r.t1 + 0.7, t));
     counter.style.opacity = a;
+    scrim.style.opacity = a;
     if (a <= 0) return;
     counter.innerHTML = fmtYear(s.label);
     const pulse = t >= r.t1 ? 1 + 0.07 * Math.exp(-(t - r.t1) * 7) : 1;
@@ -438,7 +440,7 @@ window.TR = (() => {
       const age = t - x.t0;
       if (x.cls.includes('logo')) {
         const k = easeOut(clamp(age / 0.7));
-        x.n.style.letterSpacing = `${lerp(0.32, -0.02, k)}em`;
+        x.n.style.setProperty('--k', k); // tracks in to the size's own spacing (overlay.css)
         x.n.style.filter = `blur(${(1 - k) * 14}px)`;
       } else {
         x.n.style.transform = `translateY(${(1 - easeOut(clamp(age / 0.5))) * 24}px)`;

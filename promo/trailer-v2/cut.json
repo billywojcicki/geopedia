@@ -1,5 +1,6 @@
 {
   "url": "http://127.0.0.1:8766/",
+  "theme": "light",
   "duration": 30,
   "bpm": 120,
   "note": "Times are seconds. At 120 BPM a beat is 0.5 s and a bar is 2 s.",
@@ -53,9 +54,8 @@
   "texts": [
     { "id": "bc", "cls": "dawn-year", "html": "3000 BC", "t0": 5.0, "t1": 7.7, "fade": 0.6 },
     { "id": "years", "cls": "pay pay1", "html": "5,000 years.", "t0": 24.25, "t1": 26.95, "fade": 0.25 },
-    { "id": "moments", "cls": "pay pay2", "html": "200,000 moments.", "t0": 24.95, "t1": 26.95, "fade": 0.25 },
-    { "id": "onemap", "cls": "pay pay3", "html": "One map.", "t0": 25.7, "t1": 26.95, "fade": 0.25 },
+    { "id": "onemap", "cls": "pay pay3", "html": "One map.", "t0": 25.3, "t1": 26.95, "fade": 0.25 },
     { "id": "logo", "cls": "logo", "html": "Geopedia", "t0": 28.0, "t1": 99, "fade": 0.35 },
-    { "id": "tag", "cls": "tag", "html": "The free atlas of history", "t0": 28.45, "t1": 99, "fade": 0.5 }
+    { "id": "tag", "cls": "tag", "html": "Scroll through history", "t0": 28.45, "t1": 99, "fade": 0.5 }
   ]
 }
