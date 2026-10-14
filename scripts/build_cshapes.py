@@ -10,8 +10,8 @@ Shared borders are simplified once, on the topology's arcs, so neighbours
 still meet exactly. Outlines nobody would see (those that never span a
 1 July, the moment a year on the map stands for) are dropped, and an outline
 that comes back unchanged after simplifying is merged with its neighbour in
-time. The output is one small topology the map decodes once (js/cshapes.js)
-and then filters by year:
+time. The output is one small topology the site decodes once in a worker
+(js/cshapes.js), which then hands the map one year's outlines at a time:
 
   basemap/borders/cshapes.json  {q, arcs, shapes}
     arcs:   [x0, y0, dx, dy, ...] in 1/q degrees
