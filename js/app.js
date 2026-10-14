@@ -50,7 +50,7 @@ const libReady = new Promise(res => {
 
 async function init() {
   readHash();
-  sheet = new Sheet($('#sidebar'), { onChange: onSheetChange, onDismiss: closeArticle });
+  sheet = new Sheet($('#sidebar'), { onChange: onSheetChange, onDismiss: closeArticle, onDragStart: showListIfStale });
   onSheetChange(sheet.state);
   // Stop iOS zooming the whole page on a pinch over the panels.
   document.addEventListener('gesturestart', e => e.preventDefault());
@@ -80,6 +80,9 @@ async function init() {
     pitchWithRotate: false,
     renderWorldCopies: true,
     fadeDuration: 150,
+    // The style is built by our own code (js/basemap.js): checking it against
+    // the style spec on every load only costs main-thread time.
+    validateStyle: false,
     // Phones report 3x; 2x looks the same on a map and is far cheaper to draw.
     pixelRatio: Math.min(devicePixelRatio || 1, 2),
   });
@@ -87,7 +90,8 @@ async function init() {
   space = new Space(map, { home: DEFAULT_VIEW.center });
   // Start with attribution folded into its (i) button.
   map.once('idle', () => document.querySelector('.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show'));
-  pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: toggle });
+  // A touch on a pin starts fetching its summary, a little before the tap's click.
+  pins = new Pins(map, { onHover: showHover, onLeave: hideHover, onClick: toggle, onPress: r => fetchSummary(r.title) });
   borders = new Borders(map);
   window.geopedia = { map, store, state, setYear, space, get candidates() { return candidates; } }; // for devtools
 
@@ -146,6 +150,7 @@ function onSheetChange(s) {
   syncPadding();
   clearTimeout(onSheetChange.t);
   onSheetChange.t = setTimeout(() => { obstacleCache = null; placePins(); }, 450); // after the slide
+  showListIfStale();
 }
 
 function registerServiceWorker() {
@@ -380,6 +385,23 @@ function onMoveEnd() {
 
 const updateList = debounce(renderList, 120);
 
+// The list is often out of sight: under an open article, or on phones in a
+// sheet at peek height or under search results. Rendering it then would be
+// wasted work on every map move, so it waits until it shows.
+let listStale = false;
+function listHidden() {
+  const b = document.body.classList;
+  if (b.contains('reading')) return true;
+  return !!sheet?.active && !sheet.drag?.live && (sheet.state === 'peek' || b.contains('searching'));
+}
+function showListIfStale() {
+  if (listStale && !listHidden()) renderList();
+}
+
+// Rows of the last render by record, reused while their record stays
+// listed: building rows and their images is most of a render's cost.
+let listRows = new Map();
+
 function inView(r, b, globe) {
   if (globe && map && map.getZoom() < 2.5) {
     return !(map.transform.isLocationOccluded && map.transform.isLocationOccluded({ lng: r.lng, lat: r.lat }));
@@ -393,6 +415,8 @@ function inView(r, b, globe) {
 }
 
 function renderList() {
+  if (listHidden()) { listStale = true; return; }
+  listStale = false;
   const [a, b] = range();
   // Before the map exists the list still fills in, from the estimated view.
   const bounds = map ? map.getBounds() : estimatedBounds();
@@ -420,14 +444,22 @@ function renderList() {
   }));
   const list = $('#list');
   if (!visible.length) {
+    listRows = new Map();
     list.replaceChildren(el('li', { class: 'list-empty' },
       el('strong', {}, 'Nothing recorded here yet'),
       'Try zooming out, moving the timeline, or widening the time window.'));
     return;
   }
   const shown = visible.slice(0, 120);
-  list.replaceChildren(...shown.map(listItem));
-  if (visible.length > shown.length) {
+  const rows = new Map(shown.map(r => [r, listRows.get(r) || listItem(r)]));
+  const more = visible.length > shown.length;
+  // Same rows in the same order (a small pan, a step of the timeline): leave the DOM alone.
+  const same = rows.size === listRows.size && [...rows.keys()].every((r, i) => list.children[i] === listRows.get(r))
+    && !!list.querySelector(':scope > .list-more') === more;
+  listRows = rows;
+  if (same) return;
+  list.replaceChildren(...rows.values());
+  if (more) {
     list.append(el('li', { class: 'list-more' }, `Showing the ${shown.length} most notable. Zoom in to see more.`));
   }
 }
@@ -652,6 +684,7 @@ function closeArticle() {
   if (sheet.active) sheet.snap('peek');
   $('#article-view').hidden = true;
   $('#list-view').hidden = false;
+  showListIfStale();
   placePins();
   writeHash();
 }
@@ -962,14 +995,16 @@ function bindChrome() {
   input.addEventListener('focus', () => {
     store.loadSearch().catch(() => {});
     if (input.value) search(input.value);
-    if (sheet.active && sheet.state !== 'full') { before = sheet.state; sheet.snap('full'); }
+    // Before the snap: the list under the results needn't render for it.
     document.body.classList.add('searching');
+    if (sheet.active && sheet.state !== 'full') { before = sheet.state; sheet.snap('full'); }
   });
   input.addEventListener('blur', () => setTimeout(() => {
     $('#results').hidden = true;
     document.body.classList.remove('searching');
     if (before && !choosing && !state.selected && sheet.state === 'full') sheet.snap(before);
     before = null;
+    showListIfStale();
   }, 120));
   input.addEventListener('keydown', e => {
     const items = [...$('#results').querySelectorAll('li[role=option]')];

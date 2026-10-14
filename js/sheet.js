@@ -12,10 +12,11 @@ const FULL_GAP = 52; // map left visible above a full sheet
 const FLICK = 0.45; // px/ms: a release faster than this moves one step
 
 export class Sheet {
-  constructor(el, { onChange, onDismiss }) {
+  constructor(el, { onChange, onDismiss, onDragStart }) {
     this.el = el;
     this.onChange = onChange; // (state) after every snap
     this.onDismiss = onDismiss; // dragged down past the lowest allowed state
+    this.onDragStart = onDragStart; // the sheet starts following a finger
     this.state = 'peek';
     this.states = ['peek', 'half', 'full'];
     this.drag = null;
@@ -118,6 +119,7 @@ export class Sheet {
       this.moved = true;
       this.el.classList.add('dragging');
       document.activeElement?.blur?.();
+      this.onDragStart?.();
     }
     const dt = e.timeStamp - d.lastT;
     if (dt > 0) d.v = 0.7 * d.v + 0.3 * ((e.clientY - d.last) / dt);
