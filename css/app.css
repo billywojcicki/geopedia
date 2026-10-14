@@ -246,7 +246,8 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 
 /* ---------- Article ---------- */
 
-.article-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px; position: sticky; top: 0; z-index: 2; background: var(--glass-strong); }
+.article-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 6px; position: sticky; top: 0; z-index: 2; background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .bar-actions { display: flex; align-items: center; gap: 6px; }
 .close-btn { width: 30px; height: 30px; background: var(--fill); color: var(--text-2); }
 @media (hover: hover) { .close-btn:hover { background: var(--fill-2); } }
