@@ -46,11 +46,12 @@ export function fmtRange(a, b) {
 // "1066", "-490", "490 BC", "490bce", "44 b.c." -> astronomical year
 export function parseYear(s) {
   s = String(s).trim().toLowerCase().replace(/[.,\s]/g, '');
-  const m = s.match(/^(-?\d{1,5})(bce?|ad|ce)?$/);
+  const m = s.match(/^(ad|ce)?(-?\d{1,5})(bce?|ad|ce)?$/);
   if (!m) return null;
-  let y = parseInt(m[1], 10);
-  if (m[2] && m[2].startsWith('b')) y = 1 - Math.abs(y);
-  return y;
+  const n = parseInt(m[2], 10);
+  // "44 BC" and "-44" both mean 44 BC: astronomical -43.
+  if ((m[3] && m[3].startsWith('b')) || n < 0) return 1 - Math.abs(n);
+  return n;
 }
 
 export function yearToPos(y) {

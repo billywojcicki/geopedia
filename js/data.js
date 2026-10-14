@@ -73,7 +73,8 @@ export class Store {
 
   // indexPromise lets the page start fetching index.json before modules load.
   async init(indexPromise) {
-    this.index = await (indexPromise || this.fetchRaw('index', false));
+    // One retry: a dropped request at boot shouldn't leave a dead page.
+    this.index = await (indexPromise || this.fetchRaw('index', false)).catch(() => this.fetchRaw('index', false));
     this.version = this.index.version;
     this.longReady = this.fetchRaw('long').then(rows => { this.long = rows.map(a => toRecord(a, false, 'long')); this.onLoad(); })
       .catch(() => {});

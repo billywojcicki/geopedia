@@ -146,11 +146,11 @@
   <!-- Map controls -->
   <div class="controls">
     <div class="glass ctl-group zoom">
-      <button id="zoom-in" class="ctl" aria-label="Zoom in"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-      <button id="zoom-out" class="ctl" aria-label="Zoom out"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button id="zoom-in" class="ctl" aria-label="Zoom in" title="Zoom in"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <button id="zoom-out" class="ctl" aria-label="Zoom out" title="Zoom out"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <div class="glass ctl-group">
-      <button id="layers-btn" class="ctl" aria-label="Map layers" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18"><path d="m12 3 9 5-9 5-9-5 9-5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 13 9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+      <button id="layers-btn" class="ctl" aria-label="Map layers" title="Map layers" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18"><path d="m12 3 9 5-9 5-9-5 9-5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="m3 13 9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
     </div>
     <div id="layers" class="glass popover layers" hidden>
       <label class="toggle"><input type="checkbox" id="opt-borders"><span>Historical borders</span><i></i></label>
@@ -201,7 +201,7 @@
   </section>
 
   <div id="hovercard" class="hovercard" hidden></div>
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
 
   <!-- The module runs first (document order) and starts loading data while
        MapLibre, the biggest download, is still arriving. -->

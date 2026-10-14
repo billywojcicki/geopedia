@@ -218,7 +218,7 @@ export class Pins {
     node.addEventListener('mouseenter', () => this.onHover(r, node));
     node.addEventListener('mouseleave', () => this.onLeave(r));
     node.addEventListener('click', e => { e.stopPropagation(); this.onClick(r); });
-    node.tabIndex = 0;
+    node.tabIndex = -1; // the list is the keyboard route: 50 pins before the sidebar would bury it
     node.setAttribute('role', 'button');
     node.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.onClick(r); }

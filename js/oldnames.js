@@ -11,7 +11,9 @@ const CITY_LAYERS = /^(world-cities$|label_city|label_town|label_village)/;
 
 let table = null;
 let loading = null;
-const applied = new WeakMap(); // style layer -> { orig, sig }
+let applied = new WeakMap(); // style layer -> { orig, sig }
+// A new style can keep its layer objects but reset their text: start over.
+export function resetOldNames() { applied = new WeakMap(); }
 
 export function loadOldNames() {
   loading ??= fetch(TABLE_URL).then(r => r.json()).then(t => { table = t; }).catch(() => { loading = null; });

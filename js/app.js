@@ -11,7 +11,7 @@ import { Timeline } from './timeline.js';
 import { Pins } from './pins.js';
 import { fetchSummary, fetchArticle } from './wiki.js';
 import { Borders } from './borders.js';
-import { applyOldNames, loadOldNames } from './oldnames.js';
+import { applyOldNames, loadOldNames, resetOldNames } from './oldnames.js';
 import { Space } from './space.js';
 import { Sheet } from './sheet.js';
 import { rankSearch } from './search.js';
@@ -111,15 +111,36 @@ async function init() {
     else if (sheet.active && sheet.state !== 'peek') sheet.snap('peek');
   });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async e => {
-    theme = e.matches ? 'dark' : 'light';
+    const next = e.matches ? 'dark' : 'light';
+    let style;
+    try { style = await buildStyle(next, { globe: state.globe }, window.__geopediaBoot || {}); } catch { return; } // offline: keep the old look
+    theme = next;
     styleReady = false;
-    map.setStyle(await buildStyle(theme, { globe: state.globe }));
+    resetOldNames();
+    map.setStyle(style);
+  });
+  // Lost OpenFreeMap's tile index (a blip at load): ask again, or the detailed
+  // map stays blank for the session.
+  map.on('error', e => {
+    if (e.sourceId !== 'openmaptiles' || e.tile) return;
+    setTimeout(() => { const s = map.getSource('openmaptiles'); if (s?.url) s.setUrl(s.url); }, 5000);
   });
 
   refresh(); // data may already be in: place pins and dots on the new map
   if (state.pendingSelect) openEntry({ id: state.pendingSelect, loc: state.pendingFile }, { fly: false });
   addEventListener('hashchange', onHashChange);
   addEventListener('popstate', onPopState);
+  // Offline: say so. Back online: retry what failed at once, not on its backoff.
+  addEventListener('offline', () => toast('You’re offline. The map shows what’s already loaded.', 0));
+  addEventListener('online', () => { hideToast(); store.failed.clear(); refresh(); });
+  // A tab left open across a deploy would mix old code with new data.
+  let checked = Date.now();
+  addEventListener('visibilitychange', async () => {
+    if (document.hidden || Date.now() - checked < 10 * 60 * 1000) return;
+    checked = Date.now();
+    const v = await fetch('data/index.json', { cache: 'no-cache' }).then(r => r.json()).then(j => j.version, () => null);
+    if (v && store.version && v !== store.version) toast('Geopedia was updated. Reload for the latest.', 0);
+  });
   map.once('idle', () => {
     store.prefetchWorld();
     registerServiceWorker();
@@ -581,6 +602,7 @@ function toggle(r) {
 }
 
 function select(r, { fly = false, zoom = null } = {}) {
+  openSeq++;
   hideHover();
   state.selected = r;
   showArticle(r);
@@ -598,9 +620,9 @@ function select(r, { fly = false, zoom = null } = {}) {
       const lats = pts.map(q => q[0]), lngs = pts.map(q => q[1]);
       const w = Math.min(...lngs), e = Math.max(...lngs);
       if (e - w > 150 || Math.max(...lats) - Math.min(...lats) > 80) {
-        map.flyTo({ center: [r.lng, r.lat], zoom: Math.min(map.getZoom(), 1.6), duration: 1600, essential: true });
+        map.flyTo({ center: [r.lng, r.lat], zoom: Math.min(map.getZoom(), 1.6), duration: 1600 });
       } else {
-        map.fitBounds([[w, Math.min(...lats)], [e, Math.max(...lats)]], { padding: 60, maxZoom: 5, duration: 1600, essential: true });
+        map.fitBounds([[w, Math.min(...lats)], [e, Math.max(...lats)]], { padding: 60, maxZoom: 5, duration: 1600 });
       }
     } else {
       placePins();
@@ -610,7 +632,7 @@ function select(r, { fly = false, zoom = null } = {}) {
   }
   const z = zoom ?? Math.min(Math.max(map.getZoom(), r.kind === KIND.EVENT ? 7 : 9), 13);
   if (fly) {
-    map.flyTo({ center: [r.lng, r.lat], zoom: z, duration: 1600, essential: true });
+    map.flyTo({ center: [r.lng, r.lat], zoom: z, duration: 1600 }); // not essential: reduced motion jumps
   } else if (sheet.active) {
     // The sheet now covers the bottom half: bring the pin into the free part.
     map.easeTo({ center: [r.lng, r.lat], duration: 500 });
@@ -651,19 +673,19 @@ function panelInsets() {
   const sideSheet = !collapsed && sb.top < innerHeight / 3; // desktop: panel on the left
   let bottomEdge = tl.top;
   if (!collapsed && !sideSheet) bottomEdge = Math.min(bottomEdge, sb.top);
-  return { left: sideSheet ? sb.right : 0, bottom: Math.max(0, innerHeight - bottomEdge) };
+  return { left: sideSheet ? Math.max(0, sb.right) : 0, bottom: Math.max(0, innerHeight - bottomEdge) };
 }
 
 // The first view shows the whole globe, so it's plainly a planet to spin, on
-// any screen: the zoom at which it fills about 90% of the free area (never
-// closer than the default, which fits a desktop window already).
+// any screen: the zoom at which it fills about 90% of the free area (up to
+// zoom 3, for very big screens).
 function globeZoom() {
   const { left, bottom } = panelInsets();
   const r = Math.max(80, Math.min(innerWidth - left, innerHeight - bottom) * 0.45);
   const c = 1.5 * innerHeight; // MapLibre's camera distance: a 36.87° field of view
   const R = (r * r + r * Math.hypot(r, c)) / c; // the radius that perspective shrinks to r
   const lat = (DEFAULT_VIEW.center[1] * Math.PI) / 180;
-  return Math.min(DEFAULT_VIEW.zoom, Math.log2((R * 2 * Math.PI * Math.cos(lat)) / 512));
+  return Math.min(3, Math.log2((R * 2 * Math.PI * Math.cos(lat)) / 512));
 }
 
 // Screen rects that pins must not sit under. Measuring forces layout, so the
@@ -687,8 +709,9 @@ function obstacles() {
 addEventListener('resize', () => { obstacleCache = null; });
 
 function closeArticle({ fromHistory = false } = {}) {
+  openSeq++;
   state.selected = null;
-  pins.setSelected(null);
+  pins?.setSelected(null); // the list works before the map is up
   document.body.classList.remove('reading');
   sheet.allow(['peek', 'half', 'full']);
   if (sheet.active) sheet.snap('peek');
@@ -729,7 +752,7 @@ function showArticle(r) {
   setChildren(article,
     hero,
     el('div', { class: 'badge' }, el('span', { class: 'dot' }), categoryLabel(r)),
-    el('h2', {}, r.title),
+    el('h2', { tabindex: '-1' }, r.title),
     el('div', { class: 'a-date' }, metaLine(r)),
     r.desc ? el('p', { class: 'a-desc' }, r.desc) : null,
     prose,
@@ -772,7 +795,15 @@ function showArticle(r) {
     readMore.textContent = 'Loading…';
     const html = await fetchArticle(r.title);
     if (seq !== articleSeq) return;
-    if (html) { full = true; prose.innerHTML = html; readMore.remove(); return; }
+    if (html) {
+      full = true;
+      prose.innerHTML = html;
+      readMore.remove();
+      for (const img of prose.querySelectorAll('img')) {
+        img.addEventListener('error', () => (img.closest('figure, .thumb, .tsingle') || img).remove(), { once: true });
+      }
+      return;
+    }
     readMore.disabled = false;
     readMore.textContent = 'Couldn’t load it. Try again';
   });
@@ -793,8 +824,8 @@ function nearbySection(r) {
         el('div', { class: 'li-body' }, el('div', { class: 'li-title' }, o.title), el('div', { class: 'li-meta' }, el('b', {}, metaLine(o)))));
       pressable(li, () => select(o, { fly: true }));
       if (HOVER.matches) {
-        li.addEventListener('mouseenter', () => { pins.setHighlight(o.id); pulse(o); });
-        li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
+        li.addEventListener('mouseenter', () => { pins?.setHighlight(o.id); pulse(o); });
+        li.addEventListener('mouseleave', () => { pins?.setHighlight(null); pulse(null); });
       }
       return li;
     })),
@@ -837,7 +868,10 @@ async function search(q) {
   input.setAttribute('aria-activedescendant', top.length ? 'result-0' : '');
 }
 
-// An empty search box offers a way in: the journeys, and a random article.
+// An empty search box offers a way in: a few journeys across the eras, and
+// a random article.
+const SUGGESTED = ['Ancient Egypt', 'Roman Empire', 'Viking Age', 'Mongol Empire', 'Age of Discovery', 'French Revolution', 'World War II', 'Space Race']
+  .map(n => JOURNEYS.find(j => j.name === n)).filter(Boolean);
 function showSuggestions() {
   const input = $('#search'), results = $('#results');
   const row = (i, title, meta, pick) => {
@@ -849,8 +883,8 @@ function showSuggestions() {
   };
   results.replaceChildren(
     el('li', { class: 'empty r-head' }, 'Journeys through history'),
-    ...JOURNEYS.map((j, i) => row(i, j.name, fmtYear(j.year), () => goJourney(j))),
-    row(JOURNEYS.length, 'Surprise me', 'A random article', () => $('#random').click()),
+    ...SUGGESTED.map((j, i) => row(i, j.name, fmtYear(j.year), () => goJourney(j))),
+    row(SUGGESTED.length, 'Surprise me', 'A random article', () => $('#random').click()),
   );
   results.hidden = false;
   input.setAttribute('aria-expanded', 'true');
@@ -868,13 +902,20 @@ function chooseResult(e) {
   $('#results').hidden = true;
   $('#search').value = '';
   $('#search').blur();
-  openEntry(e, { fly: true }).finally(() => { choosing = false; });
+  openEntry(e, { fly: true }).finally(() => {
+    choosing = false;
+    $('#article h2')?.focus({ preventScroll: true }); // keyboard users land on what they chose
+  });
 }
 
 // Open an item known by id (a search result, Surprise me, a shared link):
 // from data already loaded, else the one file that holds it (the search index
 // and shared links say which), else look it up in the search index.
+// Opening can wait on a file or the search index: a newer selection (or a
+// close) in the meantime wins, and the late one is dropped.
+let openSeq = 0;
 async function openEntry(e, { fly }) {
+  const seq = ++openSeq;
   let rec = store.findLoaded(e.id);
   if (!rec && e.loc) rec = await store.findRecord(e);
   if (!rec && !e.loc) {
@@ -887,7 +928,7 @@ async function openEntry(e, { fly }) {
     const entry = all?.find(x => x.id === e.id);
     if (entry) rec = await store.findRecord(entry);
   }
-  if (!rec) return;
+  if (!rec || seq !== openSeq) return;
   // Only move the timeline if the item isn't part of the current window.
   const isPlace = rec.kind >= KIND.BUILT && rec.kind <= KIND.ESTABLISHED;
   const [a, b] = range();
@@ -919,7 +960,7 @@ function goJourney(j) {
   syncSpanSelect();
   setYear(j.year);
   if (!j.center) return;
-  if (map) map.flyTo({ center: j.center, zoom: j.zoom, duration: 2200, essential: true });
+  if (map) map.flyTo({ center: j.center, zoom: j.zoom, duration: 2200 });
   else { state.center = j.center; state.zoom = j.zoom; }
 }
 
@@ -1024,7 +1065,7 @@ function bindChrome() {
   const play = () => {
     if (playTimer) { clearInterval(playTimer); playTimer = null; $('#timeline').classList.remove('playing'); return; }
     $('#timeline').classList.add('playing');
-    if (state.year >= MAX_YEAR - 1) setYear(MIN_YEAR);
+    if (state.year >= MAX_YEAR - 1) setYear(-2999); // from 3000 BC, where the record gets going
     playTimer = setInterval(() => {
       const step = Math.max(1, Math.round(span() / 2));
       if (state.year + step > MAX_YEAR) return play();
@@ -1071,7 +1112,14 @@ function bindChrome() {
   document.addEventListener('keydown', e => {
     if (e.target.closest('input, select, textarea')) return;
     if (e.key === '/') { e.preventDefault(); input.focus(); }
-    if (e.key === 'Escape' && state.selected) closeArticle();
+    if (e.key === 'Escape') {
+      // Popovers first, then the article.
+      if (!$('#journeys').hidden || !$('#layers').hidden) {
+        toggleJourneys(false);
+        $('#layers').hidden = true;
+        $('#layers-btn').setAttribute('aria-expanded', 'false');
+      } else if (state.selected) closeArticle();
+    }
     // e.code: with Shift held, e.key is "{" or "}" on many layouts.
     if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
       setYear(state.year + (e.code === 'BracketRight' ? 1 : -1) * (e.shiftKey ? 10 : 1));
@@ -1167,17 +1215,17 @@ async function share() {
 // Toast
 
 let toastTimer = null;
-function toast(msg) {
+function toast(msg, ms = 4000) {
   const t = $('#toast');
   t.textContent = msg;
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, 4000);
+  if (ms) toastTimer = setTimeout(hideToast, ms);
 }
 function hideToast() { $('#toast').hidden = true; }
 
 // Boot last, so every module-level binding above is initialised.
 init().catch(err => {
   console.error(err);
-  toast(`Something went wrong loading the map: ${err.message}`);
+  toast('Geopedia couldn’t load. Check your connection and reload the page.', 0);
 });

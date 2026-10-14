@@ -70,7 +70,9 @@ function clean(html) {
       }
     }
   }
-  for (const a of root.querySelectorAll('a')) {
+  // Ids would shadow the app's own (#timeline, #toast) once in the page.
+  for (const n of root.querySelectorAll('[id]')) n.removeAttribute('id');
+  for (const a of root.querySelectorAll('a, area')) {
     const h = a.getAttribute('href') || '';
     if (h.startsWith('/wiki/') || h.startsWith('./')) a.href = 'https://en.wikipedia.org/wiki/' + h.replace(/^(\/wiki\/|\.\/)/, '');
     else if (h.startsWith('//')) a.href = 'https:' + h;
