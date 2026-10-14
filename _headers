@@ -1,0 +1,97 @@
+# Geopedia: caching and a few safe defaults for Cloudflare.
+# Put this file in the repo root (next to index.html). It works the same on
+# Workers static assets and on Cloudflare Pages, and it is never served itself.
+# GitHub Pages ignores it (it would just serve it as a plain file, harmlessly).
+#
+# How it works: every rule whose path matches a request adds its headers, and a
+# header set by two matching rules is joined with a comma. So each
+# Cache-Control below sits on paths that do not overlap. Anything not listed
+# keeps Cloudflare's default "public, max-age=0, must-revalidate" (stored, but
+# checked with the server on every use, a cheap 304 when unchanged).
+# Limits: 100 rules, 2,000 characters per line. This file has 31 rules.
+
+# Every response
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# The app shell has no version in its URLs: always check for a new deploy.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache
+/js/*
+  Cache-Control: no-cache
+/css/*
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600
+
+# History data. index.json names the current build and must stay fresh.
+# Every other data file is requested as name.json?v=<build hash>, so a given
+# URL never changes: browsers may keep it for a year without asking.
+/data/index.json
+  Cache-Control: no-cache
+/data/a/*
+  Cache-Control: public, max-age=31536000, immutable
+/data/b/*
+  Cache-Control: public, max-age=31536000, immutable
+/data/c/*
+  Cache-Control: public, max-age=31536000, immutable
+/data/d/*
+  Cache-Control: public, max-age=31536000, immutable
+/data/p/*
+  Cache-Control: public, max-age=31536000, immutable
+/data/hist.json
+  Cache-Control: public, max-age=31536000, immutable
+/data/long.json
+  Cache-Control: public, max-age=31536000, immutable
+/data/long-2.json
+  Cache-Control: public, max-age=31536000, immutable
+/data/search.json
+  Cache-Control: public, max-age=31536000, immutable
+/data/search-2.json
+  Cache-Control: public, max-age=31536000, immutable
+/data/world.json
+  Cache-Control: public, max-age=31536000, immutable
+
+# MapLibre: the version is in the folder name, so it never changes in place.
+# (If the folder is renamed to drop the "@", this rule still matches.)
+/vendor/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Basemap: no version in the URLs, rarely changes. sw.js also refreshes these
+# in the background at most once a day. The style files stay short so a fix
+# reaches everyone within the hour; fonts and borders can sit longer.
+/basemap/positron.json
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+/basemap/world.json
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+/basemap/old-names.json
+  Cache-Control: public, max-age=3600, stale-while-revalidate=86400
+/basemap/borders/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+# Glyph files: without this Content-Type they go out as
+# application/octet-stream, which Cloudflare does not compress (about 2x larger).
+/basemap/fonts/*
+  Cache-Control: public, max-age=604800
+  Content-Type: application/x-protobuf
+
+# Icons and the link-preview image (bump og.jpg?v= in index.html when it changes).
+/icons/*
+  Cache-Control: public, max-age=604800
+/favicon.svg
+  Cache-Control: public, max-age=604800
+/og.jpg
+  Cache-Control: public, max-age=86400
+
+# Keep Cloudflare's own test addresses (*.workers.dev, *.pages.dev, preview
+# URLs) out of search results. The custom domain stays indexable.
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex
+https://:worker.:account.workers.dev/*
+  X-Robots-Tag: noindex

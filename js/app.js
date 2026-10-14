@@ -714,8 +714,12 @@ function showArticle(r) {
       el('a', { class: 'btn primary', href: wikiUrl(r.title), target: '_blank', rel: 'noopener' }, 'Open in Wikipedia ↗'),
     ),
     nearbySection(r),
-    el('p', { class: 'credit' }, 'Text from ', el('a', { href: wikiUrl(r.title), target: '_blank', rel: 'noopener' }, 'Wikipedia'),
-      ' under CC BY-SA 4.0. ', el('a', { href: `https://www.wikidata.org/wiki/Q${r.id}`, target: '_blank', rel: 'noopener' }, `Wikidata Q${r.id}`), '.'),
+    // CC BY-SA wants the licence linked and changes noted; Commons images
+    // credit their author and licence on the file page.
+    el('p', { class: 'credit' }, 'Text adapted from ', el('a', { href: wikiUrl(r.title), target: '_blank', rel: 'noopener' }, 'Wikipedia'),
+      ' under ', el('a', { href: 'https://creativecommons.org/licenses/by-sa/4.0/', target: '_blank', rel: 'license noopener' }, 'CC BY-SA 4.0'), '. ',
+      r.img ? ['Image: ', el('a', { href: `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(r.img.slice(r.img.lastIndexOf('/') + 1))}`, target: '_blank', rel: 'noopener' }, 'Wikimedia Commons'), '. '] : null,
+      el('a', { href: `https://www.wikidata.org/wiki/Q${r.id}`, target: '_blank', rel: 'noopener' }, `Wikidata Q${r.id}`), '.'),
   );
 
   let full = false; // the full article is in: a late summary mustn't replace it
@@ -732,7 +736,9 @@ function showArticle(r) {
       });
       setChildren(prose, el('p', { class: 'a-desc' }, 'Couldn’t reach Wikipedia for the summary. ', retry));
     }
-    if (!r.img && s?.thumbnail?.source && !article.querySelector('.hero')) {
+    // Only free images: a thumbnail hosted on Wikipedia itself is a fair-use
+    // one, licensed for Wikipedia alone.
+    if (!r.img && s?.thumbnail?.source?.includes('/wikipedia/commons/') && !article.querySelector('.hero')) {
       article.prepend(el('div', { class: 'hero' }, el('img', { src: s.thumbnail.source, alt: '', class: 'loaded' })));
     }
   });
