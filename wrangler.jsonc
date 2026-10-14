@@ -1,0 +1,12 @@
+{
+  // Geopedia on Cloudflare: a static site, no Worker code.
+  // "name" must match the Worker's name in the Cloudflare dashboard exactly.
+  "name": "geopedia",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    // The repo root is the site. .assetsignore keeps promo/, scripts/ and the rest out.
+    "directory": "./",
+    // Unknown paths get 404.html with a real 404 status (without this: a bare 404).
+    "not_found_handling": "404-page"
+  }
+}

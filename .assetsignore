@@ -1,0 +1,20 @@
+# Files in this repo that are not part of the website.
+# Wrangler skips them when it uploads the site to Cloudflare (same syntax as .gitignore).
+# Without this file the upload fails: promo/*.mp4 are over Cloudflare's 25 MiB per-file limit.
+/promo/
+/scripts/
+/build/
+/README.md
+/wrangler.jsonc
+/.git
+/.gitignore
+/.nojekyll
+/.github/
+/.wrangler/
+/dist/
+node_modules/
+package.json
+package-lock.json
+__pycache__/
+.DS_Store
+/.claude/
