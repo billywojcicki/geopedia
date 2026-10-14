@@ -9,7 +9,7 @@
 | 0 to 4 s | Comets race through space toward a dark Earth. |
 | 4 to 8 s | A 2001-style dawn: the sun crests the horizon to timpani and brass, and "3000 BC" appears. |
 | 8 s | The lead comet hits Mesopotamia. Flash, shockwave, drop. |
-| 8 to 24 s | One continuous shot: the globe spins a full turn east and pulls back while the years run from 3000 BC to today. Time flies when history is sparse and slows as it gets dense. Ten callouts pop on the beat. |
+| 8 to 24 s | One continuous shot: the globe spins a full turn east and pulls back while the years run from 3000 BC to today. Time flies when history is sparse and slows as it gets dense. Fourteen callouts pop on the beat. |
 | 24 to 27 s | Every era at once, and the copy. |
 | 27 to 28 s | The world collapses into a point. |
 | 28 to 30 s | The logo. |
@@ -38,7 +38,7 @@ node supervise.mjs frames 3               # the real thing, 30 fps
 sh encode.sh frames ../geopedia-trailer-v2.mp4
 ```
 
-`CHROME` points at a Chromium binary if you're not using Playwright's own. Rendering uses software GL by default so frames look the same everywhere; `SOFTWARE_GL=0` uses the GPU. Fonts are Inter and Inter Display, which must be installed.
+`CHROME` points at a Chromium binary if you're not using Playwright's own. Rendering uses software GL by default so frames look the same everywhere; `SOFTWARE_GL=0` uses the GPU. EB Garamond (year counter, end card) and Cinzel (payoff copy) are embedded from `fonts/`; the callout cards use Inter, which must be installed.
 
 Frames are captured in real time, not on a virtual clock: each frame sets the camera, year and overlays itself, waits for tiles and data, and pins pop in by video time.
 
@@ -71,7 +71,7 @@ SF2=/path/to/MuseScore_General.sf2 sh music-src/build.sh
 ## Credits
 
 - Music: an original cue written for Geopedia. Orchestral samples are from MuseScore General (MIT).
-- Fonts: Inter and Inter Display (SIL Open Font License).
+- Fonts: EB Garamond, Cinzel, Inter and Inter Display (SIL Open Font License; see `fonts/`).
 - Map data: OpenStreetMap contributors, Natural Earth, Wikidata and Wikipedia.
 - Historical borders: historical-basemaps (GPL-3.0) and CShapes 2.0 (CC BY-NC-SA 4.0).
 - Callout photos: Wikimedia Commons; see each file's page for its author and licence.
