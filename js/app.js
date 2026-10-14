@@ -27,6 +27,7 @@ const state = {
   selected: null,
 };
 let map, pins, timeline, borders, sheet, space;
+let startZoom; // the first view's zoom: from the link, or the whole globe (globeZoom)
 let candidates = []; // current window, sorted by priority
 let candById = new Map();
 let theme = themeName();
@@ -52,6 +53,7 @@ async function init() {
   readHash();
   sheet = new Sheet($('#sidebar'), { onChange: onSheetChange, onDismiss: closeArticle });
   onSheetChange(sheet.state);
+  startZoom = state.zoom ?? globeZoom();
   // Stop iOS zooming the whole page on a pinch over the panels.
   document.addEventListener('gesturestart', e => e.preventDefault());
   const boot = window.__geopediaBoot || {};
@@ -73,7 +75,7 @@ async function init() {
     container: 'map',
     style: await stylePromise,
     center: state.center || DEFAULT_VIEW.center,
-    zoom: state.zoom ?? DEFAULT_VIEW.zoom,
+    zoom: startZoom,
     attributionControl: { compact: true, customAttribution: 'Data: <a href="https://www.wikidata.org" target="_blank">Wikidata</a> &amp; <a href="https://en.wikipedia.org" target="_blank">Wikipedia</a> (CC BY-SA)' },
     maxPitch: 0,
     dragRotate: false,
@@ -235,7 +237,7 @@ function update() {
 
 function currentView() {
   const [a, b] = range();
-  return { bounds: viewBounds(), zoom: map ? map.getZoom() : state.zoom ?? DEFAULT_VIEW.zoom, a, b, standing: state.standing };
+  return { bounds: viewBounds(), zoom: map ? map.getZoom() : startZoom, a, b, standing: state.standing };
 }
 
 // [w, s, e, n] of the visible map plus a margin, so panning finds data waiting.
@@ -250,7 +252,7 @@ function viewBounds() {
 // Mercator), shaped like the LngLatBounds the map would return.
 function estimatedBounds() {
   const [lng, lat] = state.center || DEFAULT_VIEW.center;
-  const degPerPx = 360 / (512 * 2 ** (state.zoom ?? DEFAULT_VIEW.zoom));
+  const degPerPx = 360 / (512 * 2 ** startZoom);
   const dx = (innerWidth / 2) * degPerPx, dy = (innerHeight / 2) * degPerPx * Math.cos((lat * Math.PI) / 180);
   const b = [lng - dx, Math.max(-85, lat - dy), lng + dx, Math.min(85, lat + dy)];
   return { getWest: () => b[0], getSouth: () => b[1], getEast: () => b[2], getNorth: () => b[3] };
@@ -399,7 +401,7 @@ function renderList() {
   const globe = map ? map.getProjection()?.type === 'globe' : state.globe;
   const visible = candidates.filter(r => inView(r, bounds, globe));
   $('#list-title').textContent = span() === 0 ? fmtYear(state.year) : fmtRange(a, b);
-  const zoom = map ? map.getZoom() : state.zoom ?? DEFAULT_VIEW.zoom;
+  const zoom = map ? map.getZoom() : startZoom;
   const zoomHint = visible.length && zoom < STANDING_ZOOM - 0.5 && state.standing ? ' · zoom in for more' : '';
   $('#list-sub').textContent = `${visible.length.toLocaleString()} ${visible.length === 1 ? 'article' : 'articles'} in view${zoomHint}`;
   // Events of these years spread over many places (the world wars, the
@@ -601,27 +603,45 @@ function select(r, { fly = false, zoom = null } = {}) {
 function syncPadding(animate = true) {
   obstacleCache = null;
   if (!map) return;
+  const padding = { top: 0, right: 0, ...panelInsets() };
   if (sheet.active) {
-    // Use where the sheet is going, not where it is mid-slide, and glide there
-    // with it. A full sheet keeps the half-sheet padding, so the selected pin
-    // stays on screen below the controls instead of in the strip at the top.
-    const tl = sheet.state === 'peek' ? $('#timeline').offsetHeight + 10 : 0;
-    const bottom = Math.min(sheet.visible(), sheet.visible('half')) + tl;
-    const padding = { top: 0, right: 0, left: 0, bottom };
-    if (map.getPadding().bottom === bottom) return;
+    if (map.getPadding().bottom === padding.bottom) return;
     // Selecting flies right after this, with the new padding: set it now.
     if (state.selected || !animate) map.setPadding(padding);
     else map.easeTo({ padding, duration: 420 });
     return;
   }
+  map.setPadding(padding);
+}
+
+// How much of the screen's left and bottom the panels cover.
+function panelInsets() {
+  if (sheet.active) {
+    // Use where the sheet is going, not where it is mid-slide. A full sheet
+    // keeps the half-sheet padding, so the selected pin stays on screen below
+    // the controls instead of in the strip at the top.
+    const tl = sheet.state === 'peek' ? $('#timeline').offsetHeight + 10 : 0;
+    return { left: 0, bottom: Math.min(sheet.visible(), sheet.visible('half')) + tl };
+  }
   const collapsed = document.body.classList.contains('collapsed');
   const sb = $('#sidebar').getBoundingClientRect();
   const tl = $('#timeline').getBoundingClientRect();
   const sideSheet = !collapsed && sb.top < innerHeight / 3; // desktop: panel on the left
-  const left = sideSheet ? sb.right : 0;
   let bottomEdge = tl.top;
   if (!collapsed && !sideSheet) bottomEdge = Math.min(bottomEdge, sb.top);
-  map.setPadding({ top: 0, right: 0, left, bottom: Math.max(0, innerHeight - bottomEdge) });
+  return { left: sideSheet ? sb.right : 0, bottom: Math.max(0, innerHeight - bottomEdge) };
+}
+
+// The first view shows the whole globe, so it's plainly a planet to spin, on
+// any screen: the zoom at which it fills about 90% of the free area (never
+// closer than the default, which fits a desktop window already).
+function globeZoom() {
+  const { left, bottom } = panelInsets();
+  const r = Math.max(80, Math.min(innerWidth - left, innerHeight - bottom) * 0.45);
+  const c = 1.5 * innerHeight; // MapLibre's camera distance: a 36.87° field of view
+  const R = (r * r + r * Math.hypot(r, c)) / c; // the radius that perspective shrinks to r
+  const lat = (DEFAULT_VIEW.center[1] * Math.PI) / 180;
+  return Math.min(DEFAULT_VIEW.zoom, Math.log2((R * 2 * Math.PI * Math.cos(lat)) / 512));
 }
 
 // Screen rects that pins must not sit under. Measuring forces layout, so the
