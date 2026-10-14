@@ -250,7 +250,8 @@ export function ageFor(year) {
 
 export function applyAge(map, theme, t) {
   const P = PALETTES[theme], A = AGED[theme];
-  const set = (id, prop, val) => { if (map.getLayer(id)) map.setPaintProperty(id, prop, val); };
+  // Our own values: no need for MapLibre to validate each one.
+  const set = (id, prop, val) => { if (map.getLayer(id)) map.setPaintProperty(id, prop, val, { validate: false }); };
   const land = mix(P.background, A.background, t);
   const water = mix(P.water, A.water, t * 0.8);
   set('background', 'background-color', ['step', ['zoom'], water, COARSE_LAND_UNTIL, land]);
@@ -264,9 +265,11 @@ export function applyAge(map, theme, t) {
   set('building', 'fill-color', mix(P.building, A.building, t));
   set('building', 'fill-opacity', 1 - 0.5 * t);
   const roadOpacity = 1 - 0.8 * t;
-  for (const l of map.getStyle().layers) {
-    if (!/^(highway|tunnel|railway|road_|aeroway)/.test(l.id)) continue;
-    if (l.type === 'symbol') set(l.id, 'text-opacity', 1 - t);
-    else set(l.id, l.type === 'fill' ? 'fill-opacity' : 'line-opacity', roadOpacity);
+  // getLayersOrder, not getStyle: that serializes the whole style.
+  for (const id of map.getLayersOrder()) {
+    if (!/^(highway|tunnel|railway|road_|aeroway)/.test(id)) continue;
+    const type = map.getLayer(id).type;
+    if (type === 'symbol') set(id, 'text-opacity', 1 - t);
+    else set(id, type === 'fill' ? 'fill-opacity' : 'line-opacity', roadOpacity);
   }
 }

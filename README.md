@@ -73,7 +73,7 @@ Built for the X / Twitter in-app browser as much as for Safari and Chrome:
 
 Still a plain static site. The speed comes from never downloading or drawing what the current view can't show.
 
-**The night sky** (`js/space.js`) is two canvases behind the map: the stars and Milky Way are redrawn only when the camera moves (about 1 ms), shooting stars and twinkling repaint just their own few pixels at about 12 frames a second, and all of it stops once the globe fills the screen, in a background tab, or with reduced motion. To drop it, remove the `new Space(...)` line in `js/app.js`.
+**The night sky** (`js/space.js`) is two canvases behind the map: the sky is built once the first view is up (it never holds up the first pins), the stars and Milky Way are redrawn only when the camera moves (about 1 ms), shooting stars and twinkling repaint just their own few pixels at about 12 frames a second, and all of it stops once the globe fills the screen, in a background tab, or with reduced motion. To drop it, remove the `new Space(...)` line in `js/app.js`.
 
 **Level-of-detail data.** The build gives every happening a `minzoom`: the first map zoom at which it's among the 8 most notable things in its 512px map tile and time slice (a year after 1500, longer slices before). Records are then grouped into tiers, like map tiles but with time:
 
@@ -101,11 +101,11 @@ So the world view downloads only the world's top items for the window, and a cit
 
 **One origin for the first view.** MapLibre, the map style, the world basemap and the Latin glyphs of the label fonts (regular, and italic for historical borders, whose names are folded to those ranges at build time) are all served from this site, so the first view needs no third-party server at all (other glyph ranges still come from OpenFreeMap when needed).
 
-**Startup.** `index.html` starts fetching the data index, map style and world basemap before any script runs, all JS modules are preloaded in parallel, and the app module runs before MapLibre (the biggest download) arrives, so the first view's data is already in flight. Pins and the sidebar list go up as soon as the data lands, without waiting for map tiles.
+**Startup.** `index.html` starts fetching the data index, map style and world basemap before any script runs, all JS modules are preloaded in parallel, MapLibre (the biggest download) is fetched at high priority and the label font at low, and the app module runs before MapLibre arrives, so the first view's data is already in flight. The map skips validating our own style. Pins and the sidebar list go up as soon as the data lands, without waiting for map tiles.
 
 **Caching.** Data URLs carry a build hash (`?v=...`), so `sw.js` serves them cache-first forever and drops old versions. Map tiles, fonts, the basemap and MapLibre are cached too. The worker starts after the first visit has loaded, so on install it caches the boot files and the data files that visit already downloaded (from the HTTP cache): the second visit is as fast as later ones. The basemap is refreshed in the background at most once a day. Thumbnails that just failed (Wikimedia rate-limits) aren't asked for again for two minutes. Neighbouring time chunks are prefetched at low network priority, and on a fast connection all world-level chunks load in the background a few seconds after startup, so scrubbing the timeline zoomed out is instant.
 
-**Main thread.** Timeline scrubbing and data arrivals are coalesced into at most one update per animation frame, and an update with nothing new skips the work. Pin placement measures text once and caches panel geometry.
+**Main thread.** Timeline scrubbing and data arrivals are coalesced into at most one update per animation frame, and an update with nothing new skips the work. Pin placement measures each label once and caches panel geometry. The sidebar list renders only when it can be seen (not under an open article, nor in a phone's sheet at peek height or under search results) and keeps the rows of records still listed, so panning and scrubbing on a phone no longer rebuild 120 hidden rows.
 
 **Images and reading.** Pins, list thumbnails and card placeholders share one 120px thumbnail URL, so it's downloaded once and shown instantly (blurry) while the sharper card or hero image loads. Hovering a pin or list row prefetches its Wikipedia summary, so clicking usually opens instantly.
 

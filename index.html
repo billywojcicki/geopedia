@@ -54,7 +54,9 @@
       world: json('basemap/world.json'),
     };
   </script>
-  <link rel="preload" href="basemap/fonts/noto-sans-regular/0-255.pbf" as="fetch" crossorigin>
+  <!-- Labels need this only once the map draws: low priority, so it doesn't
+       hold up MapLibre and the first view's data. -->
+  <link rel="preload" href="basemap/fonts/noto-sans-regular/0-255.pbf" as="fetch" crossorigin fetchpriority="low">
   <link rel="preconnect" href="https://upload.wikimedia.org">
   <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
   <link rel="dns-prefetch" href="https://en.wikipedia.org">
@@ -204,8 +206,10 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <!-- The module runs first (document order) and starts loading data while
-       MapLibre, the biggest download, is still arriving. -->
+       MapLibre, the biggest download, is still arriving. MapLibre is on the
+       way to the first pins too, so it's fetched at high priority (deferred
+       scripts default to low). -->
   <script type="module" src="js/app.js"></script>
-  <script defer id="maplibre-js" src="vendor/maplibre-gl@5.24.0/maplibre-gl.js"></script>
+  <script defer id="maplibre-js" src="vendor/maplibre-gl@5.24.0/maplibre-gl.js" fetchpriority="high"></script>
 </body>
 </html>

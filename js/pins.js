@@ -26,13 +26,15 @@ function textWidth(s, font) {
 }
 
 const UI_FONT = getComputedStyle(document.documentElement).getPropertyValue('--font');
+const TITLE_FONT = `600 12.5px ${UI_FONT}`, SUB_FONT = `500 11px ${UI_FONT}`;
 
 export class Pins {
-  constructor(map, { onHover, onLeave, onClick }) {
+  constructor(map, { onHover, onLeave, onClick, onPress }) {
     this.map = map;
     this.onHover = onHover;
     this.onLeave = onLeave;
     this.onClick = onClick;
+    this.onPress = onPress; // a finger touched the pin: a tap's click follows soon
     this.active = new Map(); // id -> { marker, el, rec }
     this.selectedId = null;
     this.highlightId = null;
@@ -103,8 +105,8 @@ export class Pins {
       if (p.x < -10 || p.y < -10 || p.x > W + 10 || p.y > H + 10) return;
       const photo = !!r.img && !failedRecently(r.img);
       const rad = photo ? photoR : 7;
-      const title = shortTitle(r.title);
-      const tw = Math.min(170, Math.max(textWidth(title, `600 12.5px ${UI_FONT}`), textWidth(subline(r), `500 11px ${UI_FONT}`)));
+      // A record's label never changes: measure it once.
+      const tw = r.labelW ??= Math.min(170, Math.max(textWidth(shortTitle(r.title), TITLE_FONT), textWidth(subline(r), SUB_FONT)));
       const m = 3; // breathing room between pins
       const hh = Math.max(rad, 16) + m;
       // Label on the right if it fits, else on the left.
@@ -217,6 +219,7 @@ export class Pins {
     if (photo) this.loadPhoto(r, node);
     node.addEventListener('mouseenter', () => this.onHover(r, node));
     node.addEventListener('mouseleave', () => this.onLeave(r));
+    node.addEventListener('pointerdown', e => { if (e.pointerType === 'touch') this.onPress?.(r); });
     node.addEventListener('click', e => { e.stopPropagation(); this.onClick(r); });
     node.tabIndex = -1; // the list is the keyboard route: 50 pins before the sidebar would bury it
     node.setAttribute('role', 'button');

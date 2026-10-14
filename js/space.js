@@ -58,20 +58,29 @@ export class Space {
     document.documentElement.classList.add('space');
     this.small = matchMedia('(max-width: 860px)').matches;
     this.still = matchMedia('(prefers-reduced-motion: reduce)');
-    this.build(home);
     this.meteors = [];
     this.dirty = [];
     this.queued = false;
     this.active = false;
+    this.ready = false;
 
     const redraw = () => this.schedule();
     map.on('move', redraw);
-    map.on('resize', () => { this.resize(); this.schedule(); });
+    map.on('resize', () => { if (this.ready) { this.resize(); this.schedule(); } });
     map.on('projectiontransition', redraw);
     document.addEventListener('visibilitychange', () => this.animate());
     this.still.addEventListener?.('change', () => this.animate());
-    this.resize();
-    this.schedule();
+    // Building the sky takes tens of ms on a phone: it waits until the first
+    // view is up, so it never holds up the first pins. The background is
+    // already dark meanwhile (the classes above).
+    const start = () => {
+      this.build(home);
+      this.ready = true;
+      this.resize();
+      this.schedule();
+    };
+    if (window.requestIdleCallback) requestIdleCallback(start, { timeout: 1000 });
+    else setTimeout(start, 300);
   }
 
   canvas(cls) {
@@ -113,8 +122,16 @@ export class Space {
     }
     // Draw in buckets of one colour and brightness: far fewer state changes.
     stars.sort((p, q) => p.tint - q.tint || p.a - q.a);
-    this.stars = stars;
-    this.styles = TINTS.map(([r, g, b]) => Array.from({ length: ALPHAS }, (_, a) => `rgba(${r},${g},${b},${((a + 1) / ALPHAS).toFixed(2)})`));
+    // Packed into flat arrays for the loop that runs on every camera move.
+    this.starDir = new Float64Array(stars.length * 3);
+    this.starSize = new Float64Array(stars.length);
+    this.starStyle = new Uint8Array(stars.length); // index into this.styles
+    stars.forEach((s, i) => {
+      this.starDir.set(s.d, i * 3);
+      this.starSize[i] = s.size;
+      this.starStyle[i] = s.tint * ALPHAS + s.a;
+    });
+    this.styles = TINTS.flatMap(([r, g, b]) => Array.from({ length: ALPHAS }, (_, a) => `rgba(${r},${g},${b},${((a + 1) / ALPHAS).toFixed(2)})`));
 
     // The Milky Way's glow: overlapping soft clouds along the band.
     const glows = [];
@@ -164,7 +181,7 @@ export class Space {
   }
 
   schedule() {
-    if (this.queued) return;
+    if (this.queued || !this.ready) return;
     this.queued = true;
     requestAnimationFrame(() => { this.queued = false; this.draw(); });
   }
@@ -237,13 +254,19 @@ export class Space {
     g.globalAlpha = 1;
     g.globalCompositeOperation = 'source-over';
 
-    let style = '';
-    for (const s of this.stars) {
-      const p = this.project(s.d, cam);
-      if (!p || p[0] < 0 || p[1] < 0 || p[0] > w || p[1] > h) continue;
-      const st = this.styles[s.tint][s.a];
-      if (st !== style) g.fillStyle = style = st;
-      g.fillRect(p[0], p[1], s.size, s.size);
+    // project() inlined: thousands of stars, no garbage per frame.
+    const { f, r, u, focal, ox, oy } = cam;
+    const D = this.starDir, S = this.starSize, K = this.starStyle;
+    let style = -1;
+    for (let i = 0, j = 0; i < S.length; i++, j += 3) {
+      const x = D[j], y = D[j + 1], z = D[j + 2];
+      const depth = x * f[0] + y * f[1] + z * f[2];
+      if (depth < 0.05) continue;
+      const px = ox + ((x * r[0] + y * r[1] + z * r[2]) / depth) * focal;
+      const py = oy - ((x * u[0] + y * u[1] + z * u[2]) / depth) * focal;
+      if (px < 0 || py < 0 || px > w || py > h) continue;
+      if (K[i] !== style) g.fillStyle = this.styles[style = K[i]];
+      g.fillRect(px, py, S[i], S[i]);
     }
     this.twinkleAt = [];
     for (const t of this.twinklers) {
