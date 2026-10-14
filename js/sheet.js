@@ -5,7 +5,9 @@
 
 // Must match the phone media query in css/app.css. Landscape phones keep the
 // side panel (a bottom sheet would leave them almost no map).
-export const PHONE = matchMedia('(max-width: 860px) and (orientation: portrait)');
+// Narrow screens are phones whatever the orientation: a keyboard that shrinks
+// the page (Android in-app browsers) mustn't flip the layout mid-typing.
+export const PHONE = matchMedia('(max-width: 600px), (max-width: 860px) and (orientation: portrait)');
 
 const PEEK = 76; // handle + search row
 const FULL_GAP = 52; // map left visible above a full sheet

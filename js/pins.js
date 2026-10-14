@@ -55,6 +55,18 @@ export class Pins {
     const placed = [];
     const small = zoom < 3.5;
     const photoR = small ? 16 : 21;
+    // A whole-globe view: labels mustn't hang off the planet into space. The
+    // disc is where the globe meets the sky (perspective shrinks it a little).
+    let disc = null;
+    if (globe && zoom < 3) {
+      const c = map.getCenter(), p0 = map.project(c);
+      const q = map.project([c.lng, c.lat + (c.lat > 0 ? -1 : 1)]);
+      const R = Math.hypot(q.x - p0.x, q.y - p0.y) * (180 / Math.PI);
+      const cam = 1.5 * H;
+      disc = { x: p0.x, y: p0.y, r: (cam * R) / Math.sqrt(cam * cam + 2 * cam * R) - 2 };
+    }
+    const onDisc = b => !disc || [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]]
+      .every(([x, y]) => Math.hypot(x - disc.x, y - disc.y) <= disc.r);
 
     const collides = box => {
       const cx0 = Math.floor(box[0] / CELL), cx1 = Math.floor(box[2] / CELL);
@@ -99,7 +111,7 @@ export class Pins {
       const right = [p.x - rad - m, p.y - hh, p.x + rad + 6 + tw + m, p.y + hh];
       const left = [p.x - rad - 6 - tw - m, p.y - hh, p.x + rad + m, p.y + hh];
       // A label must fit on screen and not overlap anything placed already.
-      const free = b => b[0] >= 0 && b[2] <= W && b[1] >= 0 && b[3] <= H && !collides(b);
+      const free = b => b[0] >= 0 && b[2] <= W && b[1] >= 0 && b[3] <= H && onDisc(b) && !collides(b);
       let box = right, side = 'right';
       if (!force && !free(right)) {
         if (!free(left)) return;

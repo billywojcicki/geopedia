@@ -28,6 +28,7 @@ const state = {
 };
 let map, pins, timeline, borders, sheet, space;
 let startZoom; // the first view's zoom: from the link, or the whole globe (globeZoom)
+let stopPlay = () => {}; // set once the timeline's controls are bound
 let candidates = []; // current window, sorted by priority
 let candById = new Map();
 let theme = themeName();
@@ -103,7 +104,9 @@ async function init() {
   // Clicking empty map deselects; on phones it also puts the sheet away.
   map.on('click', e => {
     hideHover();
-    if (map.queryRenderedFeatures(e.point, { layers: ['dots'] }).length) return; // a dot: handled below
+    if (overPin(e)) return;
+    const r = dotAt(e.point);
+    if (r) { toggle(r); return; }
     if (state.selected) closeArticle();
     else if (sheet.active && sheet.state !== 'peek') sheet.snap('peek');
   });
@@ -116,6 +119,7 @@ async function init() {
   refresh(); // data may already be in: place pins and dots on the new map
   if (state.pendingSelect) openEntry({ id: state.pendingSelect, loc: state.pendingFile }, { fly: false });
   addEventListener('hashchange', onHashChange);
+  addEventListener('popstate', onPopState);
   map.once('idle', () => {
     store.prefetchWorld();
     registerServiceWorker();
@@ -144,6 +148,7 @@ function onSheetChange(s) {
   const b = document.body.classList;
   b.remove('sheet-peek', 'sheet-half', 'sheet-full');
   if (sheet?.active) b.add(`sheet-${s}`);
+  if (sheet?.active && s !== 'peek') stopPlay(); // the timeline steps aside: don't play on unseen
   $('#grabber').setAttribute('aria-label', s === 'full' ? 'Collapse panel' : 'Expand panel');
   syncPadding();
   clearTimeout(onSheetChange.t);
@@ -340,11 +345,22 @@ function bindDotEvents() {
     map.getCanvas().style.cursor = '';
     if (!overPin(e)) hideHover();
   });
-  map.on('click', 'dots', e => {
-    if (overPin(e)) return;
-    const r = candById.get(e.features[0].properties.id);
-    if (r) toggle(r);
-  });
+}
+
+// The record whose dot is nearest a click, within a finger's width on touch
+// screens: dots are a few pixels across and a tap rarely lands on one exactly.
+const COARSE = matchMedia('(pointer: coarse)');
+const HOVER = matchMedia('(hover: hover)');
+function dotAt(point) {
+  const pad = COARSE.matches ? 16 : 5;
+  const box = [[point.x - pad, point.y - pad], [point.x + pad, point.y + pad]];
+  let best = null, bestD = Infinity;
+  for (const f of map.queryRenderedFeatures(box, { layers: ['dots'] })) {
+    const p = map.project(f.geometry.coordinates);
+    const d = Math.hypot(p.x - point.x, p.y - point.y);
+    if (d < bestD) { bestD = d; best = f; }
+  }
+  return best ? candById.get(best.properties.id) : null;
 }
 
 function cssVar(name) {
@@ -422,9 +438,11 @@ function renderList() {
   }));
   const list = $('#list');
   if (!visible.length) {
+    const none = !state.cats.size;
     list.replaceChildren(el('li', { class: 'list-empty' },
-      el('strong', {}, 'Nothing recorded here yet'),
-      'Try zooming out, moving the timeline, or widening the time window.'));
+      el('strong', {}, none ? 'Every category is off' : 'Nothing recorded here yet'),
+      none ? el('button', { class: 'btn', onclick: () => setCats(CATEGORIES.flatMap((c, i) => (c.off ? [] : [i]))) }, 'Show them again')
+        : 'Try zooming out, moving the timeline, or widening the time window.'));
     return;
   }
   const shown = visible.slice(0, 120);
@@ -459,8 +477,11 @@ function listItem(r) {
     ),
   );
   pressable(li, () => select(r, { fly: true }));
-  li.addEventListener('mouseenter', () => { pins?.setHighlight(r.id); pulse(r); fetchSummary(r.title); });
-  li.addEventListener('mouseleave', () => { pins?.setHighlight(null); pulse(null); });
+  // Hover only: on touch screens mouseenter fires on a tap and nothing ever leaves.
+  if (HOVER.matches) {
+    li.addEventListener('mouseenter', () => { pins?.setHighlight(r.id); pulse(r); fetchSummary(r.title); });
+    li.addEventListener('mouseleave', () => { pins?.setHighlight(null); pulse(null); });
+  }
   return li;
 }
 
@@ -563,6 +584,7 @@ function select(r, { fly = false, zoom = null } = {}) {
   hideHover();
   state.selected = r;
   showArticle(r);
+  if (map && !history.state?.article) history.pushState({ article: true }, '', currentHash());
   if (!map) {
     // Clicked in the list before the map is up: it opens on the item when ready.
     if (!r.world) { state.center = [r.lng, r.lat]; state.zoom = Math.max(state.zoom ?? DEFAULT_VIEW.zoom, 5); }
@@ -664,7 +686,7 @@ function obstacles() {
 }
 addEventListener('resize', () => { obstacleCache = null; });
 
-function closeArticle() {
+function closeArticle({ fromHistory = false } = {}) {
   state.selected = null;
   pins.setSelected(null);
   document.body.classList.remove('reading');
@@ -673,6 +695,8 @@ function closeArticle() {
   $('#article-view').hidden = true;
   $('#list-view').hidden = false;
   placePins();
+  // Closed on screen: step back over the entry the article added.
+  if (!fromHistory && history.state?.article) history.back();
   writeHash();
 }
 
@@ -768,8 +792,10 @@ function nearbySection(r) {
       const li = el('li', { style: `--c:${catColor(o.cat)}` }, thumb(o, 96),
         el('div', { class: 'li-body' }, el('div', { class: 'li-title' }, o.title), el('div', { class: 'li-meta' }, el('b', {}, metaLine(o)))));
       pressable(li, () => select(o, { fly: true }));
-      li.addEventListener('mouseenter', () => { pins.setHighlight(o.id); pulse(o); });
-      li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
+      if (HOVER.matches) {
+        li.addEventListener('mouseenter', () => { pins.setHighlight(o.id); pulse(o); });
+        li.addEventListener('mouseleave', () => { pins.setHighlight(null); pulse(null); });
+      }
       return li;
     })),
   );
@@ -781,6 +807,7 @@ function nearbySection(r) {
 async function search(q) {
   const input = $('#search');
   const results = $('#results');
+  if (!q.trim() && document.activeElement === input) { showSuggestions(); return; }
   if (normalize(q.trim()).length < 2) { results.hidden = true; input.setAttribute('aria-expanded', 'false'); return; }
   // The first part of the index answers at once; the whole, once it's in.
   let entries, complete = false;
@@ -808,6 +835,25 @@ async function search(q) {
   results.hidden = false;
   input.setAttribute('aria-expanded', 'true');
   input.setAttribute('aria-activedescendant', top.length ? 'result-0' : '');
+}
+
+// An empty search box offers a way in: the journeys, and a random article.
+function showSuggestions() {
+  const input = $('#search'), results = $('#results');
+  const row = (i, title, meta, pick) => {
+    const li = el('li', { id: `result-${i}`, role: 'option', 'aria-selected': 'false', style: '--c:var(--accent)' },
+      el('span', { class: 'dot' }), el('span', { class: 'r-title' }, title), el('span', { class: 'r-meta' }, meta));
+    li.addEventListener('mousedown', ev => { ev.preventDefault(); input.blur(); pick(); });
+    li._pick = () => { input.blur(); pick(); };
+    return li;
+  };
+  results.replaceChildren(
+    el('li', { class: 'empty r-head' }, 'Journeys through history'),
+    ...JOURNEYS.map((j, i) => row(i, j.name, fmtYear(j.year), () => goJourney(j))),
+    row(JOURNEYS.length, 'Surprise me', 'A random article', () => $('#random').click()),
+  );
+  results.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
 }
 
 function resultMeta(e) {
@@ -863,17 +909,18 @@ function buildJourneys() {
   const box = $('#journeys');
   box.replaceChildren(...JOURNEYS.map(j => {
     const b = el('button', {}, el('b', {}, j.name), el('small', {}, fmtYear(j.year)));
-    b.addEventListener('click', () => {
-      toggleJourneys(false);
-      state.spanMode = j.span;
-      syncSpanSelect();
-      setYear(j.year);
-      if (!j.center) return;
-      if (map) map.flyTo({ center: j.center, zoom: j.zoom, duration: 2200, essential: true });
-      else { state.center = j.center; state.zoom = j.zoom; }
-    });
+    b.addEventListener('click', () => { toggleJourneys(false); goJourney(j); });
     return b;
   }));
+}
+
+function goJourney(j) {
+  state.spanMode = j.span;
+  syncSpanSelect();
+  setYear(j.year);
+  if (!j.center) return;
+  if (map) map.flyTo({ center: j.center, zoom: j.zoom, duration: 2200, essential: true });
+  else { state.center = j.center; state.zoom = j.zoom; }
 }
 
 function toggleJourneys(open) {
@@ -899,13 +946,17 @@ function buildFilters() {
       el('span', { class: 'dot' }), c.short);
     b.addEventListener('click', e => {
       // Alt/Option-click: show only this category.
-      if (e.altKey) state.cats = new Set([i]);
-      else if (state.cats.has(i)) state.cats.delete(i); else state.cats.add(i);
-      [...$('#filters').children].forEach((x, j) => x.setAttribute('aria-pressed', String(state.cats.has(j))));
-      refresh();
+      if (e.altKey) setCats([i]);
+      else { const next = new Set(state.cats); if (next.has(i)) next.delete(i); else next.add(i); setCats(next); }
     });
     return b;
   }));
+}
+
+function setCats(cats) {
+  state.cats = new Set(cats);
+  [...$('#filters').children].forEach((x, j) => x.setAttribute('aria-pressed', String(state.cats.has(j))));
+  refresh();
 }
 
 function setCollapsed(c) {
@@ -969,6 +1020,7 @@ function bindChrome() {
 
   // Play: move forward through time at a pace that suits the era.
   let playTimer = null;
+  stopPlay = () => { if (playTimer) play(); };
   const play = () => {
     if (playTimer) { clearInterval(playTimer); playTimer = null; $('#timeline').classList.remove('playing'); return; }
     $('#timeline').classList.add('playing');
@@ -982,12 +1034,13 @@ function bindChrome() {
   $('#play').addEventListener('click', play);
 
   const input = $('#search');
+  if (innerWidth < 420) input.placeholder = 'Search places, events…'; // the full one gets cut off
   const doSearch = debounce(() => search(input.value), 110);
   input.addEventListener('input', doSearch);
   let before = null; // sheet state to return to after searching (phones)
   input.addEventListener('focus', () => {
     store.loadSearch().catch(() => {});
-    if (input.value) search(input.value);
+    if (input.value) search(input.value); else showSuggestions();
     if (sheet.active && sheet.state !== 'full') { before = sheet.state; sheet.snap('full'); }
     document.body.classList.add('searching');
   });
@@ -1006,7 +1059,7 @@ function bindChrome() {
       items.forEach((li, i) => li.setAttribute('aria-selected', String(i === n)));
       if (items[n]) input.setAttribute('aria-activedescendant', items[n].id);
     } else if (e.key === 'Enter' && items[cur]) {
-      chooseResult(items[cur]._entry);
+      if (items[cur]._pick) items[cur]._pick(); else chooseResult(items[cur]._entry);
     } else if (e.key === 'Escape') {
       input.value = '';
       $('#results').hidden = true;
@@ -1051,6 +1104,7 @@ function readHash() {
 
 // A link pasted into an open tab: go there.
 function onHashChange() {
+  if (location.hash === traversed) { traversed = null; return; }
   if (location.hash === currentHash()) return;
   const was = state.selected?.id;
   readHash();
@@ -1078,8 +1132,17 @@ function currentHash() {
 }
 
 const writeHash = debounce(() => {
-  if (map) history.replaceState(null, '', currentHash());
+  if (map) history.replaceState(history.state, '', currentHash());
 }, 300);
+
+// Opening an article adds a history entry, so Back (or Android's back
+// gesture) closes it instead of leaving the site.
+let traversed = null; // a hash whose history step was handled already
+function onPopState() {
+  traversed = location.hash;
+  if (!history.state?.article && state.selected) closeArticle({ fromHistory: true });
+  else writeHash();
+}
 
 // Share the open article: the system share sheet where there is one (phones,
 // most in-app browsers), else copy the link.

@@ -102,7 +102,8 @@ a { color: var(--link); text-decoration: none; }
 .maplibregl-ctrl-attrib a { color: var(--text-2) !important; }
 /* #map: more specific than maplibre-gl.css, which loads later. */
 #map .maplibregl-ctrl-bottom-right { bottom: 132px; }
-@media (max-width: 860px) { #map .maplibregl-ctrl-bottom-right { bottom: auto; top: 110px; } }
+/* Under the layers button, part of the controls column, not over the map. */
+@media (max-width: 860px) { #map .maplibregl-ctrl-bottom-right { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 58px); } }
 
 .glass {
   background: var(--glass);
@@ -176,6 +177,7 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .results .r-title { font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .results .r-meta { color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .results .empty { color: var(--text-2); cursor: default; }
+.results .r-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; min-height: 0; padding-top: 10px; padding-bottom: 4px; }
 @media (hover: hover) { .results .empty:hover { background: none; } }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--c); }
@@ -222,22 +224,23 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 }
 .list li.hl { background: var(--fill); }
 @media (hover: hover) { .list li:hover { background: var(--fill); } }
-.thumb {
+.list .thumb, .nearby .thumb {
   width: 48px; height: 48px; flex: none;
   border-radius: 10px; object-fit: cover;
   background: color-mix(in srgb, var(--c) 16%, transparent);
   display: grid; place-items: center;
   overflow: hidden;
 }
-.thumb::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
-.thumb.has-img::after { display: none; }
-.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.list .thumb::after, .nearby .thumb::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
+.list .thumb.has-img::after, .nearby .thumb.has-img::after { display: none; }
+.list .thumb img, .nearby .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .li-body { min-width: 0; flex: 1; }
 .li-title { font-weight: 600; font-size: 14px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .li-meta { font-size: 12px; color: var(--text-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .li-meta b { font-weight: 500; color: var(--c); }
 .li-desc { font-size: 12px; color: var(--text-2); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.list-empty { padding: 30px 24px; text-align: center; color: var(--text-2); }
+.list li.list-empty { display: block; padding: 30px 24px; text-align: center; color: var(--text-2); cursor: default; }
+@media (hover: hover) { .list li.list-empty:hover { background: none; } }
 .list-empty strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
 .list-more { padding: 6px 20px 20px; color: var(--text-3); font-size: 12px; text-align: center; }
 
@@ -294,7 +297,8 @@ body.collapsed #sidebar { transform: translateX(calc(-100% - 2 * var(--gap))); o
 .prose h2 { font-size: 22px; }
 .prose h3 { font-size: 18px; border: 0; font-weight: 700; }
 .prose h4 { font-size: 16px; border: 0; font-weight: 700; }
-.prose img { max-width: 100%; height: auto; border-radius: 6px; }
+.prose img { max-width: 100%; height: auto; }
+.prose figure img, .prose .thumb img, .prose .tsingle img { border-radius: 6px; } /* photos, not flags and icons */
 .prose figure, .prose .thumb, .prose .tsingle { margin: 10px 0; max-width: 100%; font: 12px/1.4 var(--font); color: var(--text-2); }
 .prose .thumb::after { display: none; }
 .prose table { font: 12.5px/1.4 var(--font); border-collapse: collapse; max-width: 100%; display: block; overflow-x: auto; }
@@ -413,6 +417,7 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   position: absolute; transform: translateX(-50%);
   font-size: 10.5px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums;
 }
+.ticks span.covered { opacity: 0; }
 .ticks span::before { content: ""; position: absolute; left: 50%; top: -5px; width: 1px; height: 3px; background: var(--text-3); opacity: .6; }
 
 /* Nested inside #timeline, whose own backdrop blur means this one gets none:
@@ -530,7 +535,7 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 
 /* ---------- Phones: the sidebar becomes a bottom sheet (js/sheet.js) ---------- */
 
-@media (max-width: 860px) and (orientation: portrait) {
+@media (max-width: 600px), (max-width: 860px) and (orientation: portrait) {
   :root { --gap: 10px; --sidebar-w: 100vw; --peek: 76px; --safe-b: env(safe-area-inset-bottom, 0px); }
 
   #sidebar {
@@ -557,9 +562,12 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   .search input { height: 42px; font-size: 16px; } /* 16px: iOS won't zoom on focus */
   .search-icon { top: 13px; }
   .results { max-height: 50vh; max-height: 50dvh; }
-  /* Two rows, so every category shows without a sideways scroll. */
-  .filters { gap: 6px 5px; padding: 2px 14px 12px; }
-  .filters .chip { height: 32px; padding: 0 10px 0 9px; gap: 5px; }
+  /* One row that scrolls sideways, so a half-open sheet still has room for the list. */
+  .filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 6px; padding: 2px 14px 12px; }
+  .filters::-webkit-scrollbar, .list-world::-webkit-scrollbar { display: none; }
+  .filters .chip { flex: none; height: 36px; padding: 0 12px 0 10px; gap: 5px; }
+  .list-world { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: -20px; padding-right: 20px; }
+  .world-chip { flex: none; max-width: 75vw; }
   .list-head { padding-top: 12px; }
   .list-title { font-size: 18px; }
   /* Room to scroll the last rows above the screen edge whatever the sheet height. */
@@ -570,7 +578,7 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 
   /* Reading: the article gets the whole sheet. */
   body.reading .search-row, body.reading .filters { display: none; }
-  .article-bar { position: sticky; top: 0; z-index: 2; padding: 4px 8px 6px; background: var(--bg); }
+  .article-bar { position: sticky; top: 0; z-index: 2; padding: 4px 8px 6px; background: var(--glass-strong); }
   /* At peek only the search row shows; the chips would peek out under the home indicator. */
   body.sheet-peek .filters { visibility: hidden; }
   /* Title first, so a half-open sheet shows what it is before the photo. */
@@ -591,7 +599,7 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   }
   body:not(.sheet-peek) #timeline { transform: translateY(24px); opacity: 0; pointer-events: none; }
   .tl-row { gap: 8px; }
-  .span-select span, .pill-btn span { display: none; }
+  .span-select span { display: none; }
   .span-select select { font-size: 16px; height: 32px; }
   .pill-btn { padding: 0 8px; height: 32px; }
   .year-input { font-size: 26px; }
@@ -612,7 +620,7 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
 }
 
 /* Landscape phones: the side panel, compacted. */
-@media (max-height: 500px) and (orientation: landscape) {
+@media (max-height: 500px) and (orientation: landscape) and (min-width: 601px) {
   :root { --gap: 8px; --sidebar-w: 300px; }
   .sb-head { padding: 10px 8px 2px 16px; }
   .tagline { display: none; }
@@ -648,6 +656,10 @@ body.collapsed #timeline { left: var(--gap); margin-right: auto; }
   .chip { height: 34px; padding: 0 13px 0 11px; }
   .world-chip { height: 32px; }
   .results li { min-height: 44px; }
+  /* Fingers need about 44px: invisible margins around the small buttons. */
+  .icon-btn, .ctl, .play, .close-btn, .pill-btn { position: relative; }
+  .icon-btn::after, .ctl::after, .play::after, .pill-btn::after { content: ""; position: absolute; inset: -6px; }
+  .close-btn::after { content: ""; position: absolute; inset: -7px; }
   /* iOS zooms into any field under 16px when it gets focus. */
   .search input, .span-select select { font-size: 16px; }
 }
