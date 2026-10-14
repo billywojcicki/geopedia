@@ -41,7 +41,7 @@
   "callouts": [
     {"t": 8.5, "side": "left", "title": "Great Pyramid of Giza", "date": "2560 BC", "at": [31.1342, 29.9792], "cat": "built", "img": "e/e3/Kheops-Pyramid.jpg"},
     {"t": 9.0, "side": "right", "title": "Code of Hammurabi", "date": "1754 BC", "at": [44.4209, 32.5363], "cat": "politics", "img": "9/94/P1050763_Louvre_code_Hammurabi_face_rwk-gradient.jpg"},
-    {"t": 9.5, "side": "left", "title": "Mask of Tutankhamun", "date": "1323 BC", "at": [32.6014, 25.7402], "cat": "culture", "img": "f/fb/Wikimedia_2016_-21_(cropped).jpg", "focus": "center 22%"},
+    {"t": 9.5, "side": "left", "title": "Reign of Tutankhamun", "date": "1332–1323 BC", "at": [32.6014, 25.7402], "cat": "culture", "img": "f/fb/Wikimedia_2016_-21_(cropped).jpg", "focus": "center 22%"},
     {"t": 10.5, "side": "right", "title": "Battle of Marathon", "date": "490 BC", "at": [23.9783, 38.1181], "cat": "conflict", "img": "9/99/Scene_of_the_Battle_of_Marathon.jpg"},
     {"t": 11.25, "side": "left", "title": "Assassination of Julius Caesar", "date": "44 BC", "at": [12.4769, 41.8953], "cat": "politics", "img": "0/0a/Vincenzo_Camuccini,_The_Death_of_Julius_Caesar_(detail).jpg"},
     {"t": 12.5, "side": "right", "title": "Hagia Sophia", "date": "AD 537", "at": [28.98, 41.0083], "cat": "built", "img": "2/22/Hagia_Sophia_Mars_2013.jpg"},
