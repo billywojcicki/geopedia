@@ -88,7 +88,7 @@ async function cacheFirst(name, req, trim = false) {
   const res = await fetch(req);
   if (res.ok) {
     cache.put(req, res.clone());
-    if (trim && ++puts % 100 === 0) trimCache(cache);
+    if (trim && puts++ % 100 === 0) trimCache(cache); // the worker restarts often: trim on its first put too
   }
   return res;
 }

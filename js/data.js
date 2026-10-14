@@ -6,6 +6,7 @@ import { STANDING_ZOOM } from './config.js';
 
 const BASE = 'data/';
 const MAX_DETAIL_FILES = 24;
+const KEEP_LEAVES = 150; // detail and place files kept in memory, least recently used dropped first
 const RETRY_MS = [2000, 8000, 30000]; // a file that failed waits this long before another try
 
 // Array record -> object. Layout documented in scripts/build_data.py. `file`
@@ -17,6 +18,8 @@ function toRecord(a, standing, file) {
     minzoom: standing ? 0 : a[13], standing, file,
   };
 }
+
+const isLeaf = path => path.startsWith('d/') || path.startsWith('p/');
 
 // Web Mercator tile coordinate (fractional) for a lng/lat at zoom z.
 function tileX(lng, z) { return ((lng + 180) / 360) * 2 ** z; }
@@ -125,7 +128,20 @@ export class Store {
 
   get(path) {
     const v = this.files.get(path);
-    return Array.isArray(v) ? v : null;
+    if (!Array.isArray(v)) return null;
+    if (isLeaf(path)) { this.files.delete(path); this.files.set(path, v); } // most recently used last
+    return v;
+  }
+
+  // Panning around the world at city zoom would otherwise keep every file it
+  // ever loaded.
+  trimLeaves() {
+    let n = 0;
+    for (const k of this.files.keys()) if (isLeaf(k)) n++;
+    for (const [k, v] of this.files) {
+      if (n <= KEEP_LEAVES) break;
+      if (isLeaf(k) && Array.isArray(v)) { this.files.delete(k); n--; }
+    }
   }
 
   // low: a prefetch, which must never slow down what's on screen.
@@ -142,6 +158,7 @@ export class Store {
         const recs = rows.map(a => toRecord(a, standing, path));
         this.files.set(path, recs);
         this.failed.delete(path);
+        if (isLeaf(path)) this.trimLeaves();
         this.onLoad();
         return recs;
       }, err => {

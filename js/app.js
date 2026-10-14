@@ -322,6 +322,16 @@ function recompute(view, files) {
   updateDots();
   placePins();
   updateList();
+  fillNearby();
+}
+
+// A shared link opens its article before anything around it has loaded:
+// add the Nearby list once there is something to show.
+function fillNearby() {
+  const slot = state.selected && $('#article .a-nearby');
+  if (!slot || slot.childElementCount) return;
+  const sec = nearbySection(state.selected);
+  if (sec) slot.append(sec);
 }
 
 // ---------------------------------------------------------------------------
@@ -554,16 +564,19 @@ function showHover(r, node, point) {
     );
     card.hidden = false;
     fetchSummary(r.title); // a hover usually comes before a click: have the text ready
-    let x, y;
+    // Beside the pin and its label, never over them; on the right if it fits.
+    let left, right, y;
     if (node) {
-      const rect = node.getBoundingClientRect();
-      x = rect.left + 30; y = rect.top - 20;
+      const boxes = [...node.querySelectorAll('.pin-label, .pin-photo, .pin-dot')].map(e => e.getBoundingClientRect());
+      left = Math.min(...boxes.map(b => b.left)) - 10;
+      right = Math.max(...boxes.map(b => b.right)) + 10;
+      y = Math.min(...boxes.map(b => b.top)) - 20;
     } else {
       const c = map.getCanvas().getBoundingClientRect();
-      x = c.left + point.x + 14; y = c.top + point.y - 20;
+      left = c.left + point.x - 14; right = c.left + point.x + 14; y = c.top + point.y - 20;
     }
     const w = 280, h = card.offsetHeight;
-    if (x + w > innerWidth - 12) x -= w + 50;
+    const x = right + w <= innerWidth - 12 || left - w < 12 ? right : left - w;
     card.style.left = `${clamp(x, 12, innerWidth - w - 12)}px`;
     card.style.top = `${clamp(y, 12, innerHeight - h - 12)}px`;
   }, node ? 90 : 40);
@@ -606,7 +619,10 @@ function select(r, { fly = false, zoom = null } = {}) {
   hideHover();
   state.selected = r;
   showArticle(r);
-  if (map && !history.state?.article) history.pushState({ article: true }, '', currentHash());
+  if (map && !history.state?.article) {
+    history.replaceState({ ...history.state, base: true }, ''); // the entry Back returns to
+    history.pushState({ article: true }, '', currentHash());
+  }
   if (!map) {
     // Clicked in the list before the map is up: it opens on the item when ready.
     if (!r.world) { state.center = [r.lng, r.lat]; state.zoom = Math.max(state.zoom ?? DEFAULT_VIEW.zoom, 5); }
@@ -760,7 +776,7 @@ function showArticle(r) {
       readMore,
       el('a', { class: 'btn primary', href: wikiUrl(r.title), target: '_blank', rel: 'noopener' }, 'Open in Wikipedia ↗'),
     ),
-    nearbySection(r),
+    el('div', { class: 'a-nearby' }, nearbySection(r)),
     // CC BY-SA wants the licence linked and changes noted; Commons images
     // credit their author and licence on the file page.
     el('p', { class: 'credit' }, 'Text adapted from ', el('a', { href: wikiUrl(r.title), target: '_blank', rel: 'noopener' }, 'Wikipedia'),
@@ -1143,7 +1159,7 @@ function readHash() {
   if (m.length === 3 && m.every(Number.isFinite)) {
     state.center = [((m[1] + 540) % 360) - 180, clamp(m[0], -85, 85)];
     state.zoom = clamp(m[2], 0, 20);
-  }
+  } else if (map) state.center = null; // a pasted link without a position keeps the current view
   const a = parseInt(p.get('a'), 10);
   state.pendingSelect = a > 0 ? a : null;
   state.pendingFile = p.get('f') || null;
@@ -1185,11 +1201,13 @@ const writeHash = debounce(() => {
 
 // Opening an article adds a history entry, so Back (or Android's back
 // gesture) closes it instead of leaving the site.
+// Any other step (a pasted link, Forward) is applied by onHashChange.
 let traversed = null; // a hash whose history step was handled already
 function onPopState() {
+  if (!history.state?.base) return;
   traversed = location.hash;
-  if (!history.state?.article && state.selected) closeArticle({ fromHistory: true });
-  else writeHash();
+  if (state.selected) closeArticle({ fromHistory: true });
+  writeHash();
 }
 
 // Share the open article: the system share sheet where there is one (phones,
